@@ -19,7 +19,7 @@ python run.py events --conv c2           # the raw event log (TOOL_CALL, ESCALAT
 python -m eval.run_eval --set dev        # score against hand-labelled gold
 python -m eval.run_eval --set heldout    # paraphrased cases written after the build
 python -m eval.run_eval --set scenarios  # failures found in live chats (wrong bike, other seller)
-python -m pytest -q                      # 117 tests
+python -m pytest -q                      # 126 tests
 python run.py replay --conv v1           # a held-out conversation (v1-v3)
 
 python run.py feedback --conv c1 --outcome booked   # feedback loop
@@ -196,7 +196,7 @@ The agent never calls tools on a fixed schedule. The planner picks from what `po
 | **Structured memory** | **Lead** state (above); **buyer profile** (budget, preferences, deal-breakers, across leads); **listing facts** (paperwork status, seller claims, floor price, shared with every future buyer) | Until superseded; low-confidence facts pruned | Always in context by key |
 | **Rolling summary** | ≤5 sentences per lead | Rebuilt on any material change (stage, constraints, listing, risk, channel) | Replaces old turns in prompts |
 
-- **Retrieval into context** (`memory.build_context`): compact state, summary, last 20 messages, the selected listing's memory, and the buyer profile. Lookups are keyed, not vector search, because at this scale they are deterministic and enough. Embeddings would be a later addition for "similar past cases".
+- **Retrieval into context** (`memory.build_context`): compact state, summary, **pinned messages** (the original text behind facts still live, such as the seller's paperwork note, the price they offered and the bikes shown, kept after they leave the window; at most 6), the last 20 messages, the selected listing's memory, and the buyer profile. Lookups are keyed, not vector search, because at this scale they are deterministic and enough. Embeddings would be a later addition for "similar past cases".
 - **Compaction:** a new value supersedes the old one, which moves to `history`. Facts below 0.6 confidence that aren't confirmed within 4 messages are pruned. Small talk is never promoted. The summary is **rebuilt from state, not from the previous summary**, so it can't drift.
 - **Why listing-level memory matters:** in c2 the "paperwork pending" fact belongs to *the bike*. The next buyer who asks about L002 gets the right answer immediately (`store.listing_facts("L002")`).
 
@@ -255,7 +255,7 @@ The agent never calls tools on a fixed schedule. The planner picks from what `po
 - The dev gold was written alongside the agent, so 100% there means "the agent does what the design intends", not "it generalizes".
 - The held-out set (`data/heldout.jsonl`) was written *after* the build and found 7 real failures. I then fixed them, test-first, which means **v1–v3 are no longer held-out**: their 100% shows the fixes work, not that new conversations will score this well. The next iteration needs a fresh, unseen set, ideally sampled from real logs.
 - Two gold labels changed after review, and both changes are recorded in the label's `note`. v1#3 was tightened (it now requires `get_listing_detail`). c2#3 was widened: answering the buyer's "có rủi ro gì không?" directly (`respond_only`) is a correct move, and the original label wrongly required a tool call or a question.
-- The sample is tiny (27 labelled turns in dev + v1–v3, plus 14 in the live-chat scenarios).
+- The sample is tiny (27 labelled turns in dev + v1–v3, plus 14 in the live-chat scenarios, plus 11 in three 40-message long chats, `--set long`, which test what the agent remembers from early in a chat; results in SUBMISSION.md §6.5).
 
 ### Error analysis (from actual runs)
 Each row became a failing test in `tests/test_heldout_fixes.py` first and was then fixed.

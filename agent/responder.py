@@ -28,6 +28,8 @@ PROMISES = {
     "sẽ kiểm tra": {"escalate_to_human", "get_listing_detail"},
     "đã chuyển cho": {"escalate_to_human", "handoff_to_human"},
     "đã đặt lịch": {"book_appointment"},
+    "đã chốt lịch": {"book_appointment"},
+    "chốt lịch xem": {"book_appointment"},
     "đã tạo": {"create_chat_bridge"},
     "sẽ liên hệ lại": {"escalate_to_human", "handoff_to_human"},
     "hỏi thêm": {"ask_clarification"},
@@ -46,6 +48,9 @@ QUESTIONS = {
                                  "Nếu chưa muốn, mình có thể mở kênh chat và đặt lịch xem xe ngay trên nền tảng."),
     "choose_alternative": ("buyer", "Bạn có muốn xem thử một trong các xe ở trên không ạ?"),
     "appointment_time": ("buyer", "Bạn muốn xem xe vào lúc nào và ở đâu ạ?"),
+    "appointment_confirm": ("seller", ""),     # written from what the seller still has to agree to / give
+    "appointment_ok": ("buyer", ""),
+    "relay_question": ("seller", ""),
     "condition_history": ("seller", "Người mua hỏi xe đã từng bị ngập nước (thủy kích), tai nạn, làm lại máy "
                                     "hay còn phạt nguội chưa xử lý không. Anh/chị xác nhận giúp mình nhé?"),
     "relay_offer": ("seller", "Người mua trả {offer}, anh/chị có bớt được về mức này không ạ?"),
@@ -94,8 +99,9 @@ class TemplateResponder:
 
     def write(self, state: State, executed: list[tuple[Action, object]], new_risks: set[str],
               intents: Optional[list[str]] = None, news: Optional[list[dict]] = None,
-              sent: Optional[dict] = None) -> list[Reply]:
-        intents = intents or []
+              sent: Optional[dict] = None, pinned: Optional[list[dict]] = None,
+              message: Optional[dict] = None) -> list[Reply]:
+        intents = intents or []                  # pinned, message: only the LLM responder reads them
         sent = sent or {}
         buyer: list[str] = []
         seller: list[str] = []
@@ -103,6 +109,8 @@ class TemplateResponder:
         names = {a.name for a, _ in executed}
         fields = {a.args.get("field") for a, _ in executed if a.name == "ask_clarification"}
         budget = state.cval("budget_max")
+        room = state.participants.get("seller_id")
+        seller_here = bool(sel and sel.seller_id and room and sel.seller_id == room)
 
         for n in news or []:
             # the seller lowered the price: tell the buyer now, not when they ask again
@@ -111,6 +119,12 @@ class TemplateResponder:
                 if budget and n["floor"] > budget:
                     line += f", vẫn cao hơn ngân sách {vnd(budget)} của bạn khoảng {vnd(n['floor'] - budget)}"
                 buyer.append(line + ".")
+        for n in news or []:
+            # "ok 3h": the other side agreed to a time / place; tell the side that proposed it
+            if n["type"] == "appointment_agreed":
+                what = f"giờ xem xe {_fmt_time(n['value'])}" if n["slot"] == "time" else f"địa điểm {n['value']}"
+                (buyer if n["by"] == "seller" else seller).append(
+                    f"{'Người bán' if n['by'] == 'seller' else 'Người mua'} đồng ý {what} ạ.")
         for n in news or []:
             # answer "cần trong tuần này" about the bike being discussed, not with the next question on the list
             if n["type"] == "urgency" and sel and sel.listing_id and n["value"] == "transfer_now":
@@ -170,11 +184,17 @@ class TemplateResponder:
                             if gap > 0 and sel else f"Mình tìm được {len(cands)} xe phù hợp:")
                     buyer.append(head + "\n" + "\n".join(_listing_line(x, budget) for x in cands))
             elif a.name == "create_chat_bridge" and isinstance(result, dict) and result.get("channel_id"):
-                buyer.append(f"Mình đã tạo kênh chat giữa bạn và người bán xe {sel.model} {sel.year}.")
+                if seller_here:     # the seller is already in this chat: no new channel to announce
+                    seller.append(f"Người mua muốn hẹn xem xe {_bike(sel)}.")
+                else:
+                    buyer.append(f"Mình đã tạo kênh chat giữa bạn và người bán xe {sel.model} {sel.year}.")
             elif a.name == "book_appointment" and isinstance(result, dict):
                 if result.get("status") == "booked":
                     buyer.append(f"Mình đã đặt lịch xem xe {sel.model}: {_fmt_time(result['time'])} tại {result['place']}. "
                                  "Khi xem xe nhớ đối chiếu giấy tờ với số khung, số máy nhé.")
+                    if seller_here:
+                        seller.append(f"Mình đã chốt lịch: người mua xem xe {sel.model} {sel.year} lúc {_fmt_time(result['time'])} "
+                                      f"tại {result['place']}. Cảm ơn anh/chị ạ.")
                 else:
                     buyer.append("Mình chưa đặt được lịch, bạn cho mình xin lại thời gian và địa điểm nhé.")
             elif a.name == "handoff_to_human":
@@ -182,13 +202,21 @@ class TemplateResponder:
             elif a.name == "ask_clarification":
                 field = a.args.get("field")
                 to, text = QUESTIONS.get(field, ("buyer", "Bạn cho mình hỏi thêm một chút ạ?"))
+                if field == "relay_question" and state.relay:
+                    text = f"Người mua hỏi: \u201c{state.relay['text']}\u201d. Anh/chị trả lời giúp mình nhé?"
+                    buyer.append("Mình đã hỏi người bán giúp bạn, có trả lời mình báo bạn ngay ạ.")
+                if field in ("appointment_confirm", "appointment_ok"):
+                    text, note = _appointment_ask(state, "seller" if field == "appointment_confirm" else "buyer")
+                    (buyer if field == "appointment_confirm" else seller).append(note)
+                if field == "appointment_time" and seller_here:
+                    text = "Bạn muốn xem xe vào ngày giờ nào ạ?"     # the seller gives the place
                 if field in ("relay_offer", "accept_floor"):
                     text = text.format(offer=vnd(state.negotiation.buyer_offer),
                                        floor=vnd(sel.seller_floor if sel else None))
                 again = state.asked_counts.get(field, 0) > 1      # counted before this reply is written
                 if field == "seller_floor_price" and again:
                     text = "Người mua hỏi thêm: anh/chị có bớt được nữa không, mức thấp nhất là bao nhiêu ạ?"
-                if field not in ("seller_floor_price", "other_seller") and again:
+                if field not in ("seller_floor_price", "other_seller", "appointment_confirm", "appointment_ok") and again:
                     text = "Mình hỏi lại một chút để tìm đúng xe cho bạn: " + text[0].lower() + text[1:]
                 if field == "other_seller" and sel and again:
                     text = (f"Như mình nói ở trên, xe {_bike(sel)} là của người bán khác nên chưa hỏi giá trong cuộc trò chuyện này được. "
@@ -260,6 +288,31 @@ def _empty_search_text(state: State, args: dict) -> str:
     return f"Hiện chưa có xe nào khớp hết tiêu chí của bạn: {body}. Bạn muốn mình tìm theo hướng nào ạ?"
 
 
+def _appointment_ask(state: State, side: str) -> tuple[str, str]:
+    """(question to `side`, note to the other side) about the parts of the viewing `side` still has to answer."""
+    from .reducer import waiting_on
+    ap, sel = state.appointment, state.listing_context.selected
+    bike = f"{sel.model} {sel.year}" if sel and sel.model else ""     # no district: it reads like the place
+    w = waiting_on(state, side)
+    when = f" lúc {_fmt_time(ap.proposed_time)}" if ap.proposed_time else ""
+    where = f" tại {ap.proposed_place}" if ap.proposed_place else ""
+    if side == "seller":
+        agree = [p for p in w if p == "time" or (p == "place" and ap.proposed_place)]
+        need = ("địa chỉ cụ thể (số nhà, tên đường)" + (f" ở {ap.proposed_place}" if ap.proposed_place else "")
+                if "address" in w else "địa điểm xem xe" if ap.proposed_place is None else "")
+        if agree:
+            q = f"Người mua muốn xem xe {bike}{when if 'time' in agree else ''}{where if 'place' in agree else ''}. " \
+                "Anh/chị đồng ý không" + (f", và cho mình xin {need}" if need else "") + " ạ?"
+        else:
+            q = f"Anh/chị cho mình xin {need or 'địa điểm xem xe'} để người mua tìm đến{when} nhé?"
+        asked = ([f"xác nhận lịch{when}"] if "time" in w else []) + ([need] if need else [])
+        note = "Mình đã hỏi người bán " + " và ".join(asked) + ", chờ người bán trả lời ạ."
+        return q, note
+    parts = (when if "time" in w else "") + (where if "place" in w else "")
+    q = f"Người bán đề nghị xem xe {bike}{parts}. Bạn đồng ý không ạ?"
+    return q, "Mình đã hỏi người mua, chờ người mua xác nhận ạ."
+
+
 def _fmt_time(iso: str) -> str:
     try:
         from datetime import datetime
@@ -290,8 +343,17 @@ class Replies(BaseModel):
 RESPOND_SYSTEM = """You write the marketplace agent's chat replies in natural, polite Vietnamese (short, like a real chat).
 Use ONLY facts in FACTS and TOOL_RESULTS. Do not promise any action that is not in EXECUTED_ACTIONS.
 Never include phone numbers, Zalo IDs, bank accounts or emails. One message per recipient at most. Address questions to whoever they are for.
+MESSAGE_NOW is the message you are replying to. If it asks something, answer that first, from FACTS, KEY_MESSAGES or
+TOOL_RESULTS; if none of them has the answer, say plainly that you don't have that detail yet (never guess).
+KEY_MESSAGES are the original words behind facts that are still live (a seller's paperwork note, a price, the bikes
+shown): when you state such a fact, keep to what they say and never add details (dates, amounts) they do not contain.
 TEMPLATE_DRAFT is correct about WHICH bike each sentence is about and who is asked what: keep that, only make it read naturally.
 Never say a bike from another seller can be negotiated with the seller in this chat.
+Say you asked the seller something only when EXECUTED_ACTIONS has an ask_clarification to the seller this turn or
+ALREADY_SENT shows that question to the seller; otherwise say you have not asked yet.
+Say a viewing is booked or confirmed only when EXECUTED_ACTIONS has book_appointment; never say a side agreed to a
+time or place unless FACTS says it did.
+Never tell the buyer about an internal step you could not take ("chưa có kênh chat", a tool); say what happens next.
 ALREADY_SENT holds your last replies to each person: do not repeat facts or sentences from them; if the draft repeats
 something already said, say it in a few words ("vẫn là xe đó ạ") and move on to what is new."""
 
@@ -306,10 +368,13 @@ class LLMResponder:
 
     def write(self, state: State, executed: list[tuple[Action, object]], new_risks: set[str],
               intents: Optional[list[str]] = None, news: Optional[list[dict]] = None,
-              sent: Optional[dict] = None) -> list[Reply]:
+              sent: Optional[dict] = None, pinned: Optional[list[dict]] = None,
+              message: Optional[dict] = None) -> list[Reply]:
         draft = self.templates.write(state, executed, new_risks, intents, news, sent)
         user = json.dumps({
+            "MESSAGE_NOW": message or {},
             "FACTS": state.summary,
+            "KEY_MESSAGES": pinned or [],
             "NEWS_THIS_TURN": news or [],
             "ALREADY_SENT": {k: v[-3:] for k, v in (sent or {}).items()},
             "EXECUTED_ACTIONS": [a.model_dump() for a, _ in executed],

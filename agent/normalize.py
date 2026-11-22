@@ -208,7 +208,8 @@ MODELS = {
 }
 
 LOCATIONS = {
-    "hcm": "HCM", "tphcm": "HCM", "tp hcm": "HCM", "sài gòn": "HCM", "saigon": "HCM",
+    "hcm": "HCM", "tphcm": "HCM", "tp hcm": "HCM", "tp.hcm": "HCM", "sài gòn": "HCM", "saigon": "HCM", "sg": "HCM",
+    "hồ chí minh": "HCM",
     "hà nội": "Hà Nội", "hn": "Hà Nội", "đà nẵng": "Đà Nẵng",
 }
 
@@ -278,6 +279,42 @@ TIME_RE = re.compile(r"(\d{1,2})\s*(?:h|giờ|gio)\s*(\d{2})?", re.I)
 PLACE_RE = re.compile(r"(?<!\w)(?:ở|tại|tai)\s+((?:quận|quan|q\.?)\s*\d+|[\wÀ-ỹ]+(?:\s+[\wÀ-ỹ]+){0,2})", re.I)
 
 
+ADDRESS_RE = re.compile(r"(?<![\w/])(\d{1,4}[A-Za-z]?(?:/\d+[A-Za-z]?)*)\s+((?:đường\s+)?\w+(?:\s+\w+){0,3})")
+
+
+def find_address(text: str) -> Optional[str]:
+    """"12 Lê Lợi", "45/3 Trần Phú": a house number, then a capitalised street name (not "Quận 3 được")."""
+    for m in ADDRESS_RE.finditer(text):
+        if re.search(r"(?i)(quận|q\.?)\s*$", text[:m.start()]):
+            continue                                   # "Quận 3": a district number, not a house number
+        words = m.group(2).split()
+        if words[0].lower() == "đường":
+            words = words[1:]
+        street = []
+        for w in words:
+            if not w[:1].isupper():
+                break
+            street.append(w)
+        if street:
+            lead = "đường " if m.group(2).lower().startswith("đường") else ""
+            return f"{m.group(1)} {lead}{' '.join(street)}"
+    return None
+
+
+DISTRICT_RE = re.compile(r"(?i)(?<!\w)(?:q\.?\s*|quận\s*)(\d{1,2})(?!\w)")
+EXACT_WORDS = ["đường", "hẻm", "ngõ", "ngách", "số nhà", "chung cư", "tòa", "quán", "cafe", "cà phê", "chợ",
+               "cây xăng", "trường", "bệnh viện", "công viên", "siêu thị", "ngã tư", "vòng xoay"]
+
+
+def exact_place(place: Optional[str]) -> bool:
+    """A place someone can find ("12 Lê Lợi", "cafe Highlands Phan Xích Long"), not just an area ("Q1", "Quận 1",
+    "Phú Nhuận"). Live web chat: a viewing was booked "ở Q1" while the buyer asked for the exact address."""
+    if not place:
+        return False
+    low = place.lower()      # accents matter here: folded, "quận" (district) would match "quán" (café)
+    return bool(find_address(place) or any(re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", low) for w in EXACT_WORDS))
+
+
 def parse_appointment(text: str, ref: datetime) -> tuple[Optional[str], Optional[str]]:
     """Return (ISO datetime in +07:00, place) if the text proposes a time/place."""
     f = fold(text)
@@ -304,9 +341,16 @@ def parse_appointment(text: str, ref: datetime) -> tuple[Optional[str], Optional
         when = day.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat()
 
     place = None
-    pm = PLACE_RE.search(text)
+    am = find_address(text)
+    pm = None if am else PLACE_RE.search(text)
+    dm = None if am or pm else DISTRICT_RE.search(text)
+    if am:
+        place = am
+    elif dm:
+        place = "Quận " + dm.group(1)            # "hỏi thử Q1 được ko"
     if pm:
         place = pm.group(1).strip()
+        place = re.sub(r"(?i)(\s+(nhé|nhe|nha|nhá|ạ|đó|em|anh|chị|luôn|được|đc|không|ko))+$", "", place)  # "Phú Nhuận nhé"
         if re.match(r"(?i)(quan|quận|q\.?)\s*\d+", place):
             place = "Quận " + re.findall(r"\d+", place)[0]
     return when, place

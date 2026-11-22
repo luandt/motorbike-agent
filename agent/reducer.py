@@ -9,8 +9,12 @@ open questions. That makes them unit-testable and identical across LLM/rule mode
 """
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Any, Optional
 
+from .normalize import exact_place, find_location
+from .pii import redact
 from .models import (Extraction, Fact, Intent, LeadStage, ListingRef, Message, OpenQuestion,
                      Risk, RiskSignal, RiskType, State, Tracked)
 
@@ -21,6 +25,7 @@ HIGH_ODO_PER_YEAR = 15_000
 SLOT_WEIGHTS = {"budget_max": 3, "location": 2, "vehicle_type": 1, "brands": 1,
                 "year_min": 1, "odo": 1, "urgency": 1}
 PAPERWORK_SPECIFIC = {"pending_original_docs"}
+MAX_GAP_TO_MEET = 0.10        # don't arrange a viewing when the price is >10% apart (policy gates the bridge on it)
 IMPLAUSIBLE_DROP = 0.5          # reject an ask price or buyer offer below 50% of the known ask
 IMPLIED_CONFIDENCE = 0.6        # facts inferred from a listing, not said by anyone
 BIKE_RISKS = {RiskType.PAPERWORK_PENDING, RiskType.STOLEN_RISK, RiskType.HIGH_ODO}   # about one bike, not the deal
@@ -39,6 +44,9 @@ def _set_constraint(state: State, name: str, fact: Fact, index: int, diffs: list
             state.constraints.deal_breakers.append(fact.value)
             diffs.append({"field": "constraints.deal_breakers", "old": None, "new": fact.value, "source": fact.source_msg})
         return
+    if name == "location" and isinstance(fact.value, str):
+        # the LLM writes what the buyer typed ("SG"); listings say "HCM"
+        fact = fact.model_copy(update={"value": find_location(fact.value) or fact.value})
     cur: Optional[Tracked] = getattr(state.constraints, name)
     if cur is not None and cur.value == fact.value:
         cur.confidence = max(cur.confidence, fact.confidence)   # re-confirmed
@@ -110,6 +118,7 @@ def _select(state: State, match: ListingRef, fact: Fact, diffs: list) -> None:
     # a new bike means a new negotiation, channel and appointment
     state.negotiation.seller_stance = None
     state.negotiation.seller_firm_turns = 0
+    state.anchors = {k: v for k, v in state.anchors.items() if not k.startswith("negotiation.")}
     state.channel_id = None
     state.appointment.status = "none"
     diffs.append({"field": "listing_context.selected", "old": old.listing_id if old else None,
@@ -174,6 +183,59 @@ def _add_risk(state: State, sig: RiskSignal, diffs: list) -> None:
         diffs.append({"field": "risks", "old": f"{sig.type.value}:resolved", "new": "open", "source": sig.evidence})
 
 
+def concrete_time(value: Any) -> bool:
+    """An ISO datetime with an hour. "tomorrow afternoon" (LLM-mode live chat) can't be booked."""
+    try:
+        return "T" in str(value) and datetime.fromisoformat(str(value)) is not None
+    except ValueError:
+        return False
+
+
+def _set_appointment(state: State, name: str, fact: Fact, diffs: list) -> None:
+    """Time and place are each proposed by one side and agreed by the other. Live web chat: the seller's
+    "hẹn khách ở quận 1 được ko" was booked without the buyer, and the buyer's later "3h" was "confirmed"
+    without the seller."""
+    ap, who = state.appointment, fact.speaker
+    if name == "agree":
+        for q in ("appointment_confirm", "appointment_ok"):   # answered: what is still missing can be asked now
+            state.asked_fields.pop(q, None)
+            state.asked_counts.pop(q, None)
+        for slot in ("time", "place"):
+            if getattr(ap, f"proposed_{slot}") and getattr(ap, f"{slot}_by") not in (None, who) \
+                    and not getattr(ap, f"{slot}_agreed"):
+                setattr(ap, f"{slot}_agreed", True)
+                diffs.append({"field": f"appointment.{slot}_agreed", "old": False, "new": True, "source": fact.source_msg})
+        return
+    if name == "proposed_time" and not concrete_time(fact.value):
+        diffs.append({"field": fact.field, "old": ap.proposed_time, "new": f"rejected: {fact.value!r} has no hour",
+                      "source": "rejected:" + fact.source_msg})
+        return
+    slot = "time" if name == "proposed_time" else "place"
+    old = getattr(ap, name)
+    if old == fact.value:
+        if getattr(ap, f"{slot}_by") not in (None, who) and not getattr(ap, f"{slot}_agreed"):
+            setattr(ap, f"{slot}_agreed", True)       # the other side repeats it: agreed
+            diffs.append({"field": f"appointment.{slot}_agreed", "old": False, "new": True, "source": fact.source_msg})
+        return
+    # the seller gives the street address inside an area the buyer already agreed to ("Q1" -> "12 Lê Lợi"): still agreed
+    keep = slot == "place" and who == "seller" and ap.place_agreed and not exact_place(old) and exact_place(fact.value)
+    if keep and old and old.lower() not in str(fact.value).lower():
+        fact = fact.model_copy(update={"value": f"{fact.value}, {old}"})     # "12 Lê Lợi, Quận 1"
+    setattr(ap, name, fact.value)
+    setattr(ap, f"{slot}_by", who)
+    setattr(ap, f"{slot}_agreed", keep)
+    ap.source_msg = fact.source_msg
+    q = "appointment_ok" if who == "seller" else "appointment_confirm"   # the other side is asked afresh
+    state.asked_fields.pop(q, None)
+    state.asked_counts.pop(q, None)
+    if ap.status == "booked":                                 # a changed booking must be agreed again
+        diffs.append({"field": "appointment.status", "old": "booked", "new": "proposed", "source": fact.source_msg})
+        ap.status, ap.booking_id = "proposed", None
+    elif ap.status == "none":
+        ap.status = "proposed"
+    diffs.append({"field": fact.field, "old": old, "new": fact.value, "source": fact.source_msg})
+
+
 def apply_fact(state: State, fact: Fact, index: int, diffs: list) -> None:
     group, _, name = fact.field.partition(".")
     if group == "constraints":
@@ -191,16 +253,28 @@ def apply_fact(state: State, fact: Fact, index: int, diffs: list) -> None:
             setattr(state.negotiation, name, fact.value)
             diffs.append({"field": fact.field, "old": old, "new": fact.value, "source": fact.source_msg})
     elif group == "appointment":
-        setattr(state.appointment, name, fact.value)
-        state.appointment.source_msg = fact.source_msg
-        if state.appointment.status == "none":
-            state.appointment.status = "proposed"
-        diffs.append({"field": fact.field, "old": None, "new": fact.value, "source": fact.source_msg})
+        _set_appointment(state, name, fact, diffs)
     elif group == "consent":
         old = getattr(state.consent, name)
         if old != fact.value:
             setattr(state.consent, name, fact.value)
             diffs.append({"field": fact.field, "old": old, "new": fact.value, "source": fact.source_msg})
+
+
+# Facts whose source message is pinned into the prompt while the fact is live (memory.pinned_refs).
+# Constraints, the selected bike and risks carry their source already (Tracked.source_msg, ListingRef.source_msg,
+# Risk.evidence); these do not.
+ANCHOR_FIELDS = {"listing.ask_price", "listing.seller_floor", "listing.paperwork_status",
+                 "negotiation.seller_stance", "negotiation.buyer_offer",
+                 "consent.buyer_bridge", "consent.buyer_contact_share"}
+
+
+def _record_anchors(state: State, diffs: list[dict]) -> None:
+    for d in diffs:
+        src = str(d.get("source") or "")
+        if d["field"] in ANCHOR_FIELDS and "#" in src and not src.startswith(("rejected", "tool", "implied")):
+            key = d["field"] + (f"@{d['listing_id']}" if d.get("listing_id") else "")
+            state.anchors[key] = src
 
 
 def apply_extraction(state: State, ex: Extraction, msg: Message) -> tuple[State, list[dict]]:
@@ -216,6 +290,17 @@ def apply_extraction(state: State, ex: Extraction, msg: Message) -> tuple[State,
     # select_model first, so that later listing facts in the same message attach to the new bike
     for fact in sorted(ex.facts, key=lambda f: f.field != "listing.select_model"):
         apply_fact(state, fact, msg.index, diffs)
+    if msg.sender.value == "buyer" and Intent.ASK_SELLER in ex.intents:
+        state.relay = {"text": relay_text(redact(msg.text)[0]), "msg": msg.msg_id}
+    sel = state.listing_context.selected
+    if msg.sender.value == "buyer" and sel and sel.listing_id and not state.consent.buyer_bridge \
+            and {Intent.REQUEST_VIEWING, Intent.SCHEDULE} & set(ex.intents):
+        # a day or time for a bike already picked ("mai hoặc mốt thì đc", "chiều mai 4h") is a yes to viewing it.
+        # Live web chat: the LLM read REQUEST_VIEWING, but only "xem xe" / "kết nối" set consent, so the bridge
+        # stayed blocked and the seller was never asked about the time.
+        apply_fact(state, Fact(field="consent.buyer_bridge", value=True, source_msg=msg.msg_id, speaker="buyer",
+                               confidence=0.85), msg.index, diffs)
+    _record_anchors(state, diffs)
     for sig in ex.risks:
         if sig.type in BIKE_RISKS and sig.listing_id is None:
             # "giấy tờ đang chờ" is about the speaker's bike: the seller's own, or the one the buyer is on
@@ -250,6 +335,7 @@ def apply_tool_result(state: State, tool: str, args: dict, result: Any, msg: Mes
         lc.candidates_unchanged = bool(before) and before == [c.listing_id for c in lc.candidates]
         if lc.candidates:
             lc.candidates_at = state.msg_count
+            state.anchors["candidates_shown"] = msg.msg_id
         diffs.append({"field": "listing_context.candidates", "old": None,
                       "new": [c.listing_id for c in lc.candidates], "source": src})
     elif tool == "find_seller_listings" and isinstance(result, list):
@@ -416,6 +502,48 @@ def _stage_reason(state: State, target: LeadStage) -> str:
     }.get(target, "")
 
 
+def viewing_on(state: State) -> bool:
+    """The buyer wants to view the selected bike and nothing stops a viewing (the same checks as the bridge)."""
+    sel, neg = state.listing_context.selected, state.negotiation
+    if state.channel_id:
+        return True
+    if not (state.consent.buyer_bridge and sel and sel.listing_id):
+        return False
+    high = any(r.severity == "high" and r.status != "resolved" for r in state.active_risks())
+    return not high and (neg.gap_pct or 0) <= MAX_GAP_TO_MEET
+
+
+def _index(msg_id: Optional[str]) -> int:
+    try:
+        return int(str(msg_id).rsplit("#", 1)[1])
+    except (IndexError, ValueError):
+        return -1
+
+
+def relay_text(text: str) -> str:
+    """"hỏi chủ xe thử địa chỉ nào, đường nào" -> "địa chỉ nào, đường nào"."""
+    t = re.sub(r"(?i)^\s*(bạn\s+|ad\s+|em\s+)?hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?"
+               r"(chủ xe|chủ|người bán|bên bán|anh bán|chị bán)?\s*(thử|giúp|giùm|dùm|xem)?\s*", "", text).strip(" ,.")
+    return t or text
+
+
+def waiting_on(state: State, side: str) -> list[str]:
+    """Parts of the viewing ("time", "place") that `side` still has to agree to or give."""
+    ap, other = state.appointment, "seller" if side == "buyer" else "buyer"
+    out = [s for s in ("time", "place")
+           if getattr(ap, f"proposed_{s}") and getattr(ap, f"{s}_by") == other and not getattr(ap, f"{s}_agreed")]
+    if side == "seller" and ap.proposed_place is None:
+        out.append("place")                  # the seller's bike: the seller says where
+    elif side == "seller" and not exact_place(ap.proposed_place):
+        out.append("address")                # "Q1" is an area: the buyer needs a street address
+    return out
+
+
+def needs_agreement(state: State) -> bool:
+    """Booking needs both sides when the bike's seller is in this chat."""
+    return bool(room_seller(state)) and in_room(state, state.listing_context.selected)
+
+
 def build_open_questions(state: State) -> list[OpenQuestion]:
     qs: list[OpenQuestion] = []
     lc, neg = state.listing_context, state.negotiation
@@ -457,8 +585,20 @@ def build_open_questions(state: State) -> list[OpenQuestion]:
     if here and Intent.ASK_CONDITION.value in state.seen_intents and "condition_history" not in state.asked_fields:
         qs.append(OpenQuestion(field="condition_history", ask="seller", priority=1,
                                reason="buyer asked about flood / accident / fines; the listing record does not say"))
-    if state.channel_id and state.appointment.proposed_time is None:
-        qs.append(OpenQuestion(field="appointment_time", ask="buyer", priority=1, reason="channel open, no time yet"))
+    ap = state.appointment
+    if viewing_on(state) and ap.status != "booked":
+        if ap.proposed_time is None:
+            qs.append(OpenQuestion(field="appointment_time", ask="buyer", priority=1, reason="buyer wants to view, no hour yet"))
+        if needs_agreement(state) and ap.proposed_time and (w := waiting_on(state, "seller")):
+            qs.append(OpenQuestion(field="appointment_confirm", ask="seller", priority=1,
+                                   reason=f"seller has to agree / give: {', '.join(w)}"))
+        if needs_agreement(state) and (w := waiting_on(state, "buyer")):
+            qs.append(OpenQuestion(field="appointment_ok", ask="buyer", priority=1,
+                                   reason=f"buyer has to agree to the seller's {', '.join(w)}"))
+    if state.relay and here and room_seller(state) \
+            and state.asked_fields.get("relay_question", -1) < _index(state.relay["msg"]):
+        qs.append(OpenQuestion(field="relay_question", ask="seller", priority=1,
+                               reason=f"buyer asks the seller: {state.relay['text']}"))
     if neg.gap_pct and neg.gap_pct > BIG_GAP and lc.candidates and "choose_alternative" not in state.asked_fields:
         qs.append(OpenQuestion(field="choose_alternative", ask="buyer", priority=2,
                                reason="gap too large; offer alternatives"))

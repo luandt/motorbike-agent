@@ -1,0 +1,115 @@
+{
+  "case_id": "l1",
+  "conversation_id": "l1",
+  "sources": [
+    "data/longchats.jsonl"
+  ],
+  "objection": "long chat: the seller's paperwork details (originals in Đồng Nai, ~3 weeks) asked again 35 messages later",
+  "expected_final_state": {
+    "constraints.budget_flexibility": "approx",
+    "constraints.budget_max": 22000000,
+    "constraints.location": "HCM",
+    "constraints.urgency": "can_wait",
+    "constraints.vehicle_type": "scooter",
+    "listing.ask_price": 21000000,
+    "listing.brand": "Honda",
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.odo_km": 24000,
+    "listing.paperwork_status": "pending_original_docs",
+    "listing.year": 2020
+  },
+  "expected_final_stage": "MATCHING",
+  "expected_open_risks": [
+    "PAPERWORK_PENDING"
+  ],
+  "turns": [
+    {
+      "after_msg": "l1#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "escalate_to_human",
+        "ask_clarification"
+      ],
+      "required_actions": [
+        "escalate_to_human"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L002"
+    },
+    {
+      "after_msg": "l1#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "forbidden_questions": [
+        "urgency"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L002"
+    },
+    {
+      "after_msg": "l1#38",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "forbidden_questions": [
+        "urgency"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L002",
+      "reply_must_include": [
+        [
+          "3 tuần",
+          "ba tuần"
+        ]
+      ],
+      "reply_must_not_include": [
+        "1 tuần",
+        "một tuần",
+        "2 tuần",
+        "hai tuần",
+        "1 tháng",
+        "một tháng",
+        "4 tuần"
+      ],
+      "note": "the only source for the duration is the seller's l1#2, far outside the window"
+    },
+    {
+      "after_msg": "l1#40",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L002",
+      "reply_must_include": [
+        [
+          "đồng nai"
+        ]
+      ]
+    }
+  ]
+}

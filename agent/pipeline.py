@@ -14,7 +14,7 @@ from typing import Any, Optional
 from . import normalize as N
 from .extractor import HybridExtractor, RuleExtractor
 from .llm import make_llm
-from .memory import Store, build_context, maybe_refresh_summary, promote
+from .memory import Store, build_context, maybe_refresh_summary, pinned_messages, promote
 from .models import Action, Event, EventType, Extraction, Message, Sender, State, ToolRecord
 from .planner import LLMPlanner, RulePlanner
 from .policy import gates
@@ -119,10 +119,12 @@ class Agent:
         new_risks = self._new_risk_types(ex, risks_before)
         news = self._news(state, diffs)
         sent: dict[str, list[str]] = {}
+        pinned = pinned_messages(state, self.store, self.store.recent_messages(conv))
         for h in self.store.recent_messages(conv, k=12):
             if h.get("from") == "agent" and h.get("to") in ("buyer", "seller"):
                 sent.setdefault(h["to"], []).append(h["text"])
-        replies = self.responder.write(state, executed, new_risks, [i.value for i in ex.intents], news, sent)
+        replies = self.responder.write(state, executed, new_risks, [i.value for i in ex.intents], news, sent, pinned,
+                                       {"from": msg.sender.value, "id": msg.msg_id, "text": redacted})
         flags = self._signals(state, msg, ex, replies, executed, news)
         material = state.lead_stage != old_stage or any(
             d["field"].split(".")[0] in MATERIAL for d in diffs)
@@ -224,6 +226,12 @@ class Agent:
                 bike = f"{ref.model} {ref.year}" if ref and ref.model else "này"
                 out.append({"type": "seller_floor", "listing_id": d.get("listing_id"), "bike": bike,
                             "floor": d["new"], "ask": ref.ask_price if ref else None})
+            if d["field"] in ("appointment.time_agreed", "appointment.place_agreed") and d.get("new") \
+                    and state.appointment.status != "booked":
+                slot = d["field"].split(".")[1].split("_")[0]
+                ap = state.appointment
+                out.append({"type": "appointment_agreed", "slot": slot, "by": "seller" if getattr(ap, f"{slot}_by") == "buyer" else "buyer",
+                            "value": getattr(ap, f"proposed_{slot}")})
         return out
 
     @staticmethod

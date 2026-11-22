@@ -132,9 +132,15 @@ class RulePlanner:
         add("ask_clarification", "accept_floor", "seller named a floor; ask buyer to accept and view")
         add("book_appointment", reason="time and place proposed in an open channel")
         add("create_chat_bridge", reason="listing verified and buyer wants to view")
-        add("ask_clarification", "appointment_time", "channel open, need a time")
+        add("ask_clarification", "appointment_time", "buyer wants to view, need a time")
+        add("ask_clarification", "appointment_confirm", "the seller agrees to the buyer's time / gives the place")
+        add("ask_clarification", "appointment_ok", "the buyer agrees to the seller's time / place")
+        if not any(a.name == "ask_clarification" and a.target == "seller" for a in acts):
+            # "hỏi chủ xe thử địa chỉ nào": pass it on, unless a seller question this turn already covers it
+            add("ask_clarification", "relay_question", "the buyer asked to check something with the seller")
         add("ask_clarification", "urgency", "paperwork pending; check if buyer can wait")
-        if not (sel and sel.listing_id) and slot_coverage(state) >= SEARCH_MIN_COVERAGE:
+        if not (sel and sel.listing_id) and (slot_coverage(state) >= SEARCH_MIN_COVERAGE
+                                             or "brands_year" in state.asked_fields):   # asked once: show bikes
             # first search, or the buyer narrowed the request after one ("ưu tiên Honda, đời 2019"):
             # already_ran() skips it when the arguments have not changed
             add("search_listings", reason=f"enough requirements (coverage {slot_coverage(state):.0%})"

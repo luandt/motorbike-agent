@@ -31,5 +31,17 @@
   "x2": {
     "buyer_id": "b_202",
     "seller_id": "s_008"
+  },
+  "l1": {
+    "buyer_id": "b_301",
+    "seller_id": "s_002"
+  },
+  "l2": {
+    "buyer_id": "b_302",
+    "seller_id": "s_008"
+  },
+  "l3": {
+    "buyer_id": "b_303",
+    "seller_id": "s_005"
   }
 }

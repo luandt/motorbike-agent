@@ -103,6 +103,7 @@ class StructuredLLM:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.prompt_chars = 0            # input size, to compare context strategies (eval --recent-k / --no-pins)
 
     @property
     def name(self) -> str:
@@ -128,6 +129,7 @@ class AnthropicLLM(StructuredLLM):
     def parse(self, system: str, user: str, schema: Type[T]) -> T:
         a = self._sdk
         self.calls += 1
+        self.prompt_chars += len(system) + len(user)
         try:
             # `output_format=<Pydantic model>` is what gives us a validated `parsed_output`.
             # Newer SDKs warn that it is deprecated in favour of output_config.format; we
@@ -197,6 +199,7 @@ class OpenAILLM(StructuredLLM):
     def parse(self, system: str, user: str, schema: Type[T]) -> T:
         o = self._sdk
         self.calls += 1
+        self.prompt_chars += len(system) + len(user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
             if not self.json_mode:
@@ -260,6 +263,7 @@ class GeminiLLM(StructuredLLM):
     def parse(self, system: str, user: str, schema: Type[T]) -> T:
         import httpx
         self.calls += 1
+        self.prompt_chars += len(system) + len(user)
         config = self._types.GenerateContentConfig(
             system_instruction=system,
             response_mime_type="application/json",

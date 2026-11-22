@@ -55,6 +55,7 @@ class Intent(str, Enum):
     REQUEST_CONTACT = "REQUEST_CONTACT"
     SHARE_CONTACT = "SHARE_CONTACT"        # seller posts their own phone / Zalo
     ASK_CONDITION = "ASK_CONDITION"        # flood damage, accidents, traffic fines
+    ASK_SELLER = "ASK_SELLER"              # "hỏi chủ xe thử ...": the buyer wants a question passed to the seller
     ASK_DISCOUNT = "ASK_DISCOUNT"          # buyer asks whether the price can come down (no number)
     CONSENT_SHARE_CONTACT = "CONSENT_SHARE_CONTACT"
     SCHEDULE = "SCHEDULE"
@@ -200,6 +201,11 @@ class Appointment(BaseModel):
     status: Literal["none", "proposed", "booked", "failed"] = "none"
     booking_id: Optional[str] = None
     source_msg: Optional[str] = None
+    # each part is proposed by one side and must be agreed by the other before booking
+    time_by: Optional[str] = None         # buyer | seller
+    place_by: Optional[str] = None
+    time_agreed: bool = False
+    place_agreed: bool = False
 
 
 class Action(BaseModel):
@@ -233,6 +239,10 @@ class State(BaseModel):
     handed_off: bool = False
     seen_intents: list[str] = Field(default_factory=list)
     turn_intents: list[str] = Field(default_factory=list)      # intents of the latest message only
+    relay: Optional[dict] = None      # {"text", "msg"}: the buyer's latest question for the seller (redacted)
+    # "field" or "field@listing_id" -> id of the message that set a live price / consent / paperwork fact,
+    # plus "candidates_shown" -> the turn whose agent reply listed the current candidates (see memory.pinned_refs)
+    anchors: dict[str, str] = Field(default_factory=dict)
     asked_fields: dict[str, int] = Field(default_factory=dict)   # question field -> msg_count when asked
     asked_counts: dict[str, int] = Field(default_factory=dict)   # question field -> times asked
     next_best_action: list[Action] = Field(default_factory=list)

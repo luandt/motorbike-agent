@@ -126,3 +126,38 @@ def test_high_odo_risk_belongs_to_its_bike():
     assert odo.listing_id == "L999"
     st.listing_context.selected = ListingRef(listing_id="L005", model="Lead", year=2021, odo_km=12_000)
     assert st.risk(odo.type) is None
+
+
+class DropLLM(L.StructuredLLM):
+    """Long-chat LLM eval, l2#40: "Ok em lấy giá đó, em muốn xem xe trực tiếp" came back as DROP."""
+    provider, model = "fake", "drop"
+
+    def parse(self, system, user, schema):
+        if schema is LLMExtraction:
+            return LLMExtraction(intents=["DROP", "REQUEST_VIEWING"], facts=[], risks=[])
+        raise L.LLMUnavailable("rules for the rest")
+
+
+def _buyer(text, i=1):
+    return Message(conversation_id="d", msg_id=f"d#{i}", index=i, sender=Sender.BUYER, text=text,
+                   timestamp=datetime(2026, 3, 3, 9, i, tzinfo=timezone.utc))
+
+
+def test_llm_drop_needs_a_withdrawal_word():
+    from agent.extractor import LLMExtractor
+    from agent.models import State
+    ex = LLMExtractor(DropLLM())
+    took = ex.extract(_buyer("Ok em lấy giá đó, em muốn xem xe trực tiếp"), State(conversation_id="d"))
+    assert [i.value for i in took.intents] == ["REQUEST_VIEWING"] and ex.drops_rejected == 1
+    quit_ = ex.extract(_buyer("Thôi em mua xe khác rồi anh", 2), State(conversation_id="d"))
+    assert "DROP" in [i.value for i in quit_.intents]
+
+
+def test_taking_the_price_does_not_close_the_lead():
+    rules = Agent(Store(":memory:"), mode="rules", conversations_path=ROOT / "data/conversations.json")
+    msgs = load_messages([ROOT / "data/longchats.jsonl"], "l2")
+    for m in msgs[:-1]:
+        rules.handle(m)
+    t = Agent(rules.store, mode="llm", llm=DropLLM(),
+              conversations_path=ROOT / "data/conversations.json").handle(msgs[-1])
+    assert not t.state.handed_off and t.state.lead_stage.value != "DROPPED"

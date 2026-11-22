@@ -31,12 +31,12 @@ FACT_FIELDS = [
     "listing.year", "listing.odo_km", "listing.ask_price", "listing.seller_floor",
     "listing.paperwork_status", "listing.seller_claims",
     "negotiation.seller_stance", "negotiation.buyer_stance", "negotiation.buyer_offer",
-    "appointment.proposed_time", "appointment.proposed_place",
+    "appointment.proposed_time", "appointment.proposed_place", "appointment.agree",
     "consent.buyer_bridge", "consent.buyer_contact_share",
 ]
 INT_FIELDS = {"negotiation.buyer_offer", "constraints.budget_max", "constraints.year_min", "constraints.odo_max",
               "listing.year", "listing.odo_km", "listing.ask_price", "listing.seller_floor"}
-BOOL_FIELDS = {"consent.buyer_bridge", "consent.buyer_contact_share"}
+BOOL_FIELDS = {"consent.buyer_bridge", "consent.buyer_contact_share", "appointment.agree"}
 
 OBJECTION = ["cao quá", "đắt", "mắc", "cao", "chát"]
 BUYER_OFFER = ["bớt", "được không", "trả", "lấy giá", "để lại", "fix"]
@@ -68,7 +68,7 @@ CONDITION = ["thủy kích", "thuỷ kích", "ngập nước", "ngập", "tai n�
 ASK_DISCOUNT = ["có giảm", "giảm thêm", "giảm được", "giảm giá", "có bớt", "bớt thêm", "bớt được", "bớt giá",
                 "fix được", "fix thêm", "thương lượng"]
 # the buyer accepts / picks something just offered
-ACCEPT = ["được", "ok", "okie", "oke", "okay", "chốt", "lấy", "ưng", "chọn", "thích", "muốn xem", "cũng được"]
+ACCEPT = ["được", "ok", "oki", "okie", "oke", "okay", "chốt", "lấy", "ưng", "chọn", "thích", "muốn xem", "cũng được"]
 YES = ACCEPT + ["có", "ừ", "đồng ý", "kết nối", "nhờ", "giúp"]
 RECENT_CANDIDATES = 2   # "cũng okie" picks the bike shown within this many messages
 THIS_BIKE = ["xe này", "chiếc này", "con này", "xe đó của anh", "xe của anh", "xe của chị"]
@@ -126,6 +126,24 @@ def match_listing(text: str, state: State) -> Optional[str]:
     return None
 
 
+DAY_WORDS = re.compile(r"(?<!\w)(mai|mốt|thứ|chủ nhật|hôm nay|nay|ngày)(?!\w)", re.I)
+
+
+def same_day(when: str, text: str, state: State) -> str:
+    """A bare hour while a time is on the table ("ok 3h" after "3h chiều mai") keeps that day and half of the day,
+    so the other side's "ok 3h" reads as agreeing, not as 3am today."""
+    cur = state.appointment.proposed_time
+    if not cur or DAY_WORDS.search(text):
+        return when
+    try:
+        from datetime import datetime
+        c, w = datetime.fromisoformat(cur), datetime.fromisoformat(when)
+    except ValueError:
+        return when
+    hour = w.hour + 12 if w.hour < 12 <= c.hour and not re.search(r"(?i)sáng", text) else w.hour
+    return c.replace(hour=hour, minute=w.minute).isoformat()
+
+
 class RuleExtractor:
     name = "rules"
 
@@ -157,7 +175,7 @@ class RuleExtractor:
         t = msg.text
         if N.has_any(t, ["chào", "hello", "hi"]):
             ex.intents.append(Intent.GREETING)
-        if N.has_any(t, ["tìm", "kiếm", "cần mua", "muốn mua"]):
+        if N.has_any(t, ["tìm", "kiếm", "cần mua", "muốn mua", "giới thiệu", "gợi ý", "có xe nào", "xe nào ok"]):
             ex.intents.append(Intent.SEARCH)
         if vt := N.find_vehicle_type(t):
             self._add(ex, msg, "constraints.vehicle_type", vt)
@@ -256,6 +274,8 @@ class RuleExtractor:
             self._add(ex, msg, "consent.buyer_bridge", True, 0.9)
         if N.has_any(t, CONDITION):
             ex.intents.append(Intent.ASK_CONDITION)
+        if re.search(r"(?i)hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?(chủ xe|chủ|người bán|bên bán)", t):
+            ex.intents.append(Intent.ASK_SELLER)
         if N.has_any(t, ASK_DISCOUNT) and Intent.OFFER_PRICE not in ex.intents:
             ex.intents.append(Intent.ASK_DISCOUNT)
         # "có" / "ok" right after the agent offered to connect with another seller's bike
@@ -276,12 +296,25 @@ class RuleExtractor:
             when, place = N.parse_appointment(t, msg.timestamp)
             if when:
                 ex.intents.append(Intent.SCHEDULE)
-                self._add(ex, msg, "appointment.proposed_time", when, 0.85)
+                self._add(ex, msg, "appointment.proposed_time", same_day(when, t, state), 0.85)
             if place:
                 self._add(ex, msg, "appointment.proposed_place", place, 0.85)
+        elif (state.consent.buyer_bridge or state.channel_id) and (am := N.find_address(t)):
+            self._add(ex, msg, "appointment.proposed_place", am, 0.85)
+        elif state.listing_context.selected and re.search(r"(?<!\w)(mai|mốt|cuối tuần)(?!\w)", t.lower()):
+            ex.intents.append(Intent.REQUEST_VIEWING)     # "mai hoặc mốt thì đc": a day, no hour yet
+        self._agree(msg, state, ex)
 
         if N.has_any(t, ["thôi không mua", "không cần nữa", "mua rồi", "hủy"]):
             ex.intents.append(Intent.DROP)
+
+    def _agree(self, msg: Message, state: State, ex: Extraction) -> None:
+        """"ok" / "được" while the other side's time or place waits for this side's answer."""
+        ap, who = state.appointment, msg.sender.value
+        pending = any(getattr(ap, f"proposed_{s}") and getattr(ap, f"{s}_by") not in (None, who)
+                      and not getattr(ap, f"{s}_agreed") for s in ("time", "place"))
+        if pending and accepts(msg.text):
+            self._add(ex, msg, "appointment.agree", True, 0.85)
 
     def _seller(self, msg: Message, state: State, ex: Extraction) -> None:
         t = msg.text
@@ -314,6 +347,17 @@ class RuleExtractor:
             else:
                 ex.intents.append(Intent.OFFER_PRICE)
                 self._add(ex, msg, "listing.ask_price", max(m.high for m in ms), 0.95, cl)
+
+        self._agree(msg, state, ex)
+        arranging = state.appointment.proposed_time or state.consent.buyer_bridge or state.channel_id
+        if arranging and (N.TIME_RE.search(t) or N.PLACE_RE.search(t) or N.find_address(t)
+                          or N.DISTRICT_RE.search(t)):
+            # while a viewing is being arranged: "ok em, 4h qua 12 Phan Xích Long nhé" / "hẹn ở quận 1 được ko"
+            when, place = N.parse_appointment(t, msg.timestamp)
+            if when and N.TIME_RE.search(t):
+                self._add(ex, msg, "appointment.proposed_time", same_day(when, t, state), 0.85)
+            if place:
+                self._add(ex, msg, "appointment.proposed_place", place, 0.85)
 
         if N.has_any(t, SELLER_FIRM):
             ex.intents.append(Intent.FIRM_PRICE)
@@ -407,6 +451,13 @@ Rules:
   STOLEN_RISK (no registration).
 - A deposit amount ("cọc trước 5 triệu") is never a price offer or a budget.
 - Intent ASK_CONDITION when the buyer asks about flood damage, accidents, engine rebuilds or traffic fines.
+- appointment.proposed_time: ISO 8601 with +07:00 ("2026-11-23T15:00:00+07:00"), only when the message gives an hour.
+  A day alone ("chiều mai") is not a time; leave it out. appointment.agree: "true" when this message accepts the
+  time or place the OTHER side proposed (see context.state.appointment).
+  appointment.proposed_place: the street address ("12 Lê Lợi, Q1") when given, else the area ("Q1").
+- Intent ASK_SELLER when the buyer asks you to check something with the seller ("hỏi chủ xe thử địa chỉ nào").
+- Intent DROP only when the buyer says they no longer want this bike or the deal ("thôi không mua", "em mua xe khác rồi").
+  Agreeing to a price or asking to see the bike ("ok em lấy giá đó") is the opposite of DROP.
 - Return empty lists when nothing applies."""
 
 
@@ -424,10 +475,17 @@ def _coerce(field: str, value: str) -> Any:
 
 # intents only one side can have; an LLM sometimes tags the seller's "nếu bạn cần gấp giấy tờ..."
 # as the buyer's PAPERWORK_CONCERN, which then triggers buyer-facing replies. Code decides.
-BUYER_ONLY = {Intent.SEARCH, Intent.ASK_INFO, Intent.ASK_PAPERWORK, Intent.PAPERWORK_CONCERN, Intent.ASK_CONDITION,
+BUYER_ONLY = {Intent.ASK_SELLER, Intent.SEARCH, Intent.ASK_INFO, Intent.ASK_PAPERWORK, Intent.PAPERWORK_CONCERN, Intent.ASK_CONDITION,
               Intent.ASK_DISCOUNT, Intent.OBJECT_PRICE, Intent.SELECT_LISTING, Intent.REFERENCE_LISTING,
               Intent.REQUEST_VIEWING, Intent.REQUEST_CONNECT, Intent.CONSENT_SHARE_CONTACT, Intent.DROP}
 SELLER_ONLY = {Intent.FIRM_PRICE, Intent.REJECT_INTERMEDIARY, Intent.REQUEST_CONTACT, Intent.SHARE_CONTACT}
+
+# DROP ends the lead, so an LLM DROP needs a withdrawal word in the text. Long-chat LLM eval, l2#40:
+# "Ok em lấy giá đó, em muốn xem xe trực tiếp" came back as DROP and the lead was closed. Wider than the
+# rule list (which acts on its own): here the LLM has already judged the meaning, the cue only confirms it.
+DROP_CUES = ["không mua", "ko mua", "k mua", "không lấy", "ko lấy", "khỏi", "không cần", "ko cần", "mua rồi",
+             "mua xe khác", "lấy xe khác", "hủy", "huỷ", "không quan tâm", "để sau", "bỏ qua", "thôi em", "thôi anh",
+             "thôi chị", "thôi mình", "thôi bỏ", "không theo", "dừng"]
 
 
 class LLMExtractor:
@@ -435,6 +493,7 @@ class LLMExtractor:
 
     def __init__(self, llm: StructuredLLM):
         self.llm = llm
+        self.drops_rejected = 0
 
     def extract(self, msg: Message, state: State, context: Optional[dict] = None) -> Extraction:
         ex = Extraction(msg_id=msg.msg_id, extractor=self.name)
@@ -448,6 +507,9 @@ class LLMExtractor:
         out: LLMExtraction = self.llm.parse(EXTRACT_SYSTEM, user, LLMExtraction)
         wrong_side = SELLER_ONLY if msg.sender == Sender.BUYER else BUYER_ONLY
         ex.intents = [i for i in dict.fromkeys(out.intents) if i not in wrong_side]
+        if Intent.DROP in ex.intents and not N.has_any(msg.text, DROP_CUES):
+            ex.intents.remove(Intent.DROP)
+            self.drops_rejected += 1
         for f in out.facts:
             val = _coerce(f.field, f.value)
             if val in (None, "", []):

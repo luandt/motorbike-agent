@@ -16,6 +16,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from .normalize import exact_place
 from .models import Event, EventType, LeadStage, State
 from .reducer import slot_coverage
 
@@ -56,7 +57,7 @@ class Store:
             out = [e for e in out if e["type"] in names]
         return out
 
-    def recent_messages(self, conversation_id: str, k: int = RECENT_K) -> list[dict]:
+    def recent_messages(self, conversation_id: str, k: Optional[int] = None) -> list[dict]:
         out = []
         for e in self.events(conversation_id, [EventType.USER_MESSAGE, EventType.AGENT_ACTION]):
             p = e["payload"]
@@ -64,8 +65,25 @@ class Store:
                 out.append({"from": p["sender"], "id": p["msg_id"], "text": p["text"]})
             else:
                 for r in p.get("replies", []):
-                    out.append({"from": "agent", "to": r["to"], "text": r["text"]})
-        return out[-k:]
+                    out.append({"from": "agent", "to": r["to"], "at": e["at_msg"], "text": r["text"]})
+        return out[-(k or RECENT_K):]
+
+    def messages_at(self, conversation_id: str, ids: set[str]) -> dict[tuple[str, str], list[dict]]:
+        """Logged (PII-redacted) text by message id: ("user", id) -> the message, ("agent", id) -> the agent's
+        replies to the buyer in that turn."""
+        out: dict[tuple[str, str], list[dict]] = {}
+        for e in self.events(conversation_id, [EventType.USER_MESSAGE, EventType.AGENT_ACTION]):
+            if e["at_msg"] not in ids:
+                continue
+            p = e["payload"]
+            if e["type"] == "USER_MESSAGE":
+                out[("user", e["at_msg"])] = [{"from": p["sender"], "id": p["msg_id"], "text": p["text"]}]
+            else:
+                rs = [{"from": "agent", "to": r["to"], "at": e["at_msg"], "text": r["text"]}
+                      for r in p.get("replies", []) if r["to"] == "buyer"]
+                if rs:
+                    out[("agent", e["at_msg"])] = rs
+        return out
 
     # ---------------- structured ---------------- #
     def load_state(self, conversation_id: str) -> Optional[State]:
@@ -186,12 +204,79 @@ def compact_state(state: State) -> dict:
     }
 
 
+MAX_PINS = 6            # pinned messages per prompt, on top of the recent window
+PIN_CHARS = 300         # a pinned message is cut to this many characters
+
+
+def pinned_refs(state: State) -> list[tuple[str, str, str]]:
+    """The messages behind facts that are live now, most important first: (kind, msg id, why).
+    kind "user" is a buyer/seller message; "agent" is the agent's reply to the buyer in that turn."""
+    refs: list[tuple[str, str, str]] = []
+
+    def add(kind: str, mid: Optional[str], why: str) -> None:
+        if mid and "#" in mid and not any(r[0] == kind and r[1] == mid for r in refs):
+            refs.append((kind, mid, why))
+
+    rank = {"high": 0, "medium": 1, "low": 2}
+    for r in sorted(state.active_risks(), key=lambda r: rank[r.severity]):
+        if r.status != "resolved":
+            said = [ev for ev in r.evidence if "#" in ev]                 # messages, not tool or listing records
+            for ev in dict.fromkeys(said[:1] + said[-1:]):                 # first and latest
+                add("user", ev, f"risk {r.type.value} ({r.status})")
+    lc = state.listing_context
+    sel = lc.selected
+    if sel:
+        add("user", sel.source_msg, f"bike under discussion: {sel.model} {sel.year} ({sel.listing_id})")
+    if lc.candidates:
+        add("agent", state.anchors.get("candidates_shown"),
+            "bikes shown to the buyer: " + ", ".join(c.listing_id for c in lc.candidates if c.listing_id))
+    seller = state.participants.get("seller_id")
+    live_bikes = {x.listing_id for x in [sel, *lc.previous] if x and x.listing_id
+                  and (x is sel or x.seller_id == seller)}                # the selected bike and this seller's own
+    for key, mid in state.anchors.items():
+        field, _, lid = key.partition("@")
+        if key == "candidates_shown" or (lid and lid not in live_bikes):
+            continue
+        add("user", mid, f"{field} on {lid}" if lid else field)
+    for name in ("budget_max", "urgency"):
+        t = getattr(state.constraints, name)
+        if t is not None:
+            add("user", t.source_msg, f"constraints.{name}")
+    return refs
+
+
+def pinned_messages(state: State, store: Store, recent: list[dict]) -> list[dict]:
+    """Old messages behind live facts that the recent window no longer shows, oldest first."""
+    shown = {("user", m["id"]) for m in recent if m.get("id")} | \
+            {("agent", m["at"]) for m in recent if m.get("at") and m.get("to") == "buyer"}
+    refs = [r for r in pinned_refs(state) if (r[0], r[1]) not in shown][:MAX_PINS]
+    if not refs:
+        return []
+    found = store.messages_at(state.conversation_id, {r[1] for r in refs})
+    out = []
+    for kind, mid, why in refs:
+        for m in found.get((kind, mid), []):
+            text = m["text"] if len(m["text"]) <= PIN_CHARS else m["text"][:PIN_CHARS] + "…"
+            out.append({**m, "text": text, "why": why})
+    order = {mid: i for i, mid in enumerate(sorted({r[1] for r in refs}, key=_msg_index))}
+    return sorted(out, key=lambda m: order[m.get("id") or m.get("at")])
+
+
+def _msg_index(mid: str) -> int:
+    try:
+        return int(mid.rsplit("#", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 def build_context(state: State, store: Store) -> dict:
     sel = state.listing_context.selected
+    recent = store.recent_messages(state.conversation_id)
     return {
         "state": compact_state(state),
         "summary": state.summary,
-        "recent_messages": store.recent_messages(state.conversation_id),
+        "pinned_messages": pinned_messages(state, store, recent),
+        "recent_messages": recent,
         "listing_memory": store.listing_facts(sel.listing_id if sel else None),
         "buyer_profile": store.buyer_profile(state.participants.get("buyer_id")),
     }
@@ -223,8 +308,18 @@ def summarize(state: State) -> str:
         parts.append("Risks: " + ", ".join(open_r) + ".")
     if state.channel_id:
         parts.append(f"Channel {state.channel_id} open.")
-    if state.appointment.status == "booked":
-        parts.append(f"Viewing booked {state.appointment.proposed_time} at {state.appointment.proposed_place}.")
+    ap = state.appointment
+    if ap.status == "booked":
+        parts.append(f"Viewing booked {ap.proposed_time} at {ap.proposed_place}.")
+    elif ap.proposed_time or ap.proposed_place:
+        def part(slot):
+            v, by, ok = getattr(ap, f"proposed_{slot}"), getattr(ap, f"{slot}_by"), getattr(ap, f"{slot}_agreed")
+            if not v:
+                return f"{slot} not set"
+            other = "seller" if by == "buyer" else "buyer"
+            area = " (an area only: no street address yet)" if slot == "place" and not exact_place(v) else ""
+            return f"{slot} {v}{area} (from {by}; {other} {'agreed' if ok else 'has NOT agreed yet'})"
+        parts.append("Viewing NOT booked: " + "; ".join(part(s) for s in ("time", "place")) + ".")
     parts.append(f"Stage {state.lead_stage.value}.")
     return " ".join(parts)
 

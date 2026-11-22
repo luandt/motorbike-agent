@@ -1,0 +1,92 @@
+{
+  "case_id": "l2",
+  "conversation_id": "l2",
+  "sources": [
+    "data/longchats.jsonl"
+  ],
+  "objection": "long chat: the seller's lowest price and its terms (23tr5 this week, 2 helmets) asked again 35 messages later",
+  "expected_final_state": {
+    "consent.buyer_bridge": true,
+    "constraints.budget_flexibility": "approx",
+    "constraints.budget_max": 23000000,
+    "constraints.location": "HCM",
+    "listing.ask_price": 24500000,
+    "listing.brand": "Honda",
+    "listing.listing_id": "L008",
+    "listing.model": "Vision",
+    "listing.odo_km": 8000,
+    "listing.paperwork_status": "clean",
+    "listing.seller_floor": 23500000,
+    "listing.year": 2022
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PRICE_GAP"
+  ],
+  "turns": [
+    {
+      "after_msg": "l2#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "ask_clarification"
+      ],
+      "required_question": "seller_floor_price",
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008"
+    },
+    {
+      "after_msg": "l2#2",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "required_question": "accept_floor",
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008"
+    },
+    {
+      "after_msg": "l2#38",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "reply_must_include": [
+        [
+          "23tr5",
+          "23.5tr",
+          "23,5tr",
+          "23.500.000",
+          "23,5 triệu",
+          "23.5 triệu",
+          "23 triệu 5"
+        ],
+        [
+          "nón",
+          "mũ"
+        ]
+      ],
+      "note": "the floor is in state; the helmets and the 'this week' condition are only in l2#2"
+    },
+    {
+      "after_msg": "l2#40",
+      "acceptable_actions": [
+        "create_chat_bridge",
+        "ask_clarification"
+      ],
+      "required_actions": [
+        "create_chat_bridge"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008"
+    }
+  ]
+}

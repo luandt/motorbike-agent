@@ -7,11 +7,12 @@ This is the "LLM proposes, code decides" boundary.
 from __future__ import annotations
 
 from .models import RiskType, State
-from .reducer import BIG_GAP, slot_coverage
+from .reducer import BIG_GAP, MAX_GAP_TO_MEET, concrete_time, needs_agreement, slot_coverage, waiting_on
 
 ESCALATE_TYPES = {RiskType.PAPERWORK_PENDING, RiskType.DEPOSIT_REQUEST, RiskType.STOLEN_RISK}
-MAX_GAP_TO_MEET = 0.10        # don't arrange a viewing when the price is >10% apart
 SEARCH_MIN_COVERAGE = 0.6     # search once budget + location + type (or equivalent) are known; enforced in the gate
+# ...or once the narrowing question (brand / year) was asked and the buyer moved on: one optional question, not a
+# wall. Live web chat: "27t", "sg", then "có xe nào giới thiệu" got the brand/year question a second time.
 
 ACTION_CATALOG = {
     "ask_clarification": "Ask the buyer or seller one question from open_questions.",
@@ -63,7 +64,8 @@ def gates(state: State) -> tuple[dict[str, str], dict[str, str]]:
     alternatives = bool(sel and sel.ask_price) and (neg.gap_pct or 0) > BIG_GAP   # bike too expensive: look around
     search_block = (
         "need budget and one of location / vehicle type / brand" if not (has_budget and has_scope)
-        else f"coverage {cov:.0%} < {SEARCH_MIN_COVERAGE:.0%}: ask more first" if cov < SEARCH_MIN_COVERAGE and not alternatives
+        else f"coverage {cov:.0%} < {SEARCH_MIN_COVERAGE:.0%}: ask more first"
+        if cov < SEARCH_MIN_COVERAGE and not alternatives and "brands_year" not in state.asked_fields
         else None
     )
     gate("search_listings", search_block is None,
@@ -92,6 +94,11 @@ def gates(state: State) -> tuple[dict[str, str], dict[str, str]]:
         "no channel" if not state.channel_id
         else "already booked" if ap.status == "booked"
         else "no time/place agreed" if not (ap.proposed_time and ap.proposed_place)
+        else "time has no hour" if not concrete_time(ap.proposed_time)
+        else "seller has not agreed to " + ", ".join(waiting_on(state, "seller"))
+        if needs_agreement(state) and waiting_on(state, "seller")
+        else "buyer has not agreed to " + ", ".join(waiting_on(state, "buyer"))
+        if needs_agreement(state) and waiting_on(state, "buyer")
         else f"blocked by {high_txt}" if high
         else f"price gap {neg.gap_pct:.0%}" if (neg.gap_pct or 0) > MAX_GAP_TO_MEET
         else None

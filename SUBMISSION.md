@@ -10,7 +10,8 @@ python run.py replay --all -v              # c1, c2, c3 turn by turn: facts, sta
 python run.py replay --conv c1 --followup  # c1 continued until a viewing is booked
 python -m eval.run_eval --set dev          # evaluation against hand-labelled gold
 python -m eval.run_eval --set scenarios    # failures found in live chats
-python -m pytest -q                        # 117 tests
+python -m eval.run_eval --set long         # 40+ message chats: early details asked again late
+python -m pytest -q                        # 126 tests
 python run.py web                          # live demo in the browser: buyer and seller in two tabs
 python run.py chat                         # same in the terminal: type as buyer (b: ...) or seller (s: ...); /help
 python run.py chat < demo/live_demo.txt    # scripted walkthrough of the risk cases
@@ -223,9 +224,12 @@ Exact wording, greetings and small talk, the old agent's replies, full tool payl
 `memory.build_context()` assembles, by key and not by search:
 1. compact state (constraints, selected listing, candidates, negotiation, risks, consent, appointment, slot coverage);
 2. the rolling summary;
-3. the last 20 messages;
-4. the selected listing's memory (`listing_facts[listing_id]`);
-5. the buyer profile (`buyer_profiles[buyer_id]`).
+3. **pinned messages**: the original words behind facts that are still live, once they have left the recent window (below);
+4. the last 20 messages;
+5. the selected listing's memory (`listing_facts[listing_id]`);
+6. the buyer profile (`buyer_profiles[buyer_id]`).
+
+**Pinned messages.** State keeps a fact as a label (`PAPERWORK_PENDING`, `seller_floor = 24tr`); the words behind it fall out of the window in a long chat. Every live fact already knows its source message, so the context builder adds that message back: the first and latest evidence of each open risk, the message that picked the current bike, the agent reply that listed the bikes shown, the price, stance and consent messages for the bike under discussion and the seller's own bike, and the budget and urgency messages. A pin is dropped when its fact is (a resolved risk, another seller's bike the buyer moved away from, a negotiation that restarted), skipped while the message is still in the window, capped at 6 per prompt and 300 characters each, and taken from the redacted log. The LLM extractor and planner see pins in their context; the LLM responder gets them as `KEY_MESSAGES` and is told not to add details they don't contain. Example: 30 messages after c2#2, a buyer asking "bao lâu thì sang tên?" in LLM mode still has the seller's "giấy tờ đang chờ rút hồ sơ gốc" in front of it, not just a label (`tests/test_pinned_anchors.py`).
 
 Keyed retrieval is deterministic and enough at this scale. Embeddings would be added later only for "find similar past cases" (few-shot examples).
 
@@ -525,6 +529,37 @@ What each run found and what changed:
 - **Run 3, LLM repeats:** the responder now sees what it already sent to each person (`ALREADY_SENT`), and the "mình đang trao đổi về xe …" confirmation is skipped if it was already said. Repeat flags went from 3 to 1; the one left is a short "Vẫn là xe đó ạ." sent twice.
 
 Decided after run 2, before run 3: the LLM's early searches were reasonable, so search now opens at 60% coverage (budget + location + type) for both planners, enforced in the policy gate; the gold stages for c1#1 and v1#1 were updated to match. Still open: extraction false positives, mostly because the gold is strict ("xe còn mới" → `condition_pref`, an appointment marked "proposed", a `seller_stance` the gold leaves empty), and the run-to-run variance a 9-case set cannot measure. The eval report stores each turn's intents, facts, selected bike and replies, so an LLM failure can be read without paying for a rerun.
+
+   **Context-window experiment (pinned anchors, §4.2).** Same 9 cases, OpenAI gpt-6-luna, one run each (`--recent-k`, `--no-pins`):
+
+| | window 20 | window 4 + pins | window 4, no pins |
+|---|---|---|---|
+| next-action · stage · open-risk match | 100% · 100% · 100% | 100% · 100% · 100% | 100% · 100% · 100% |
+| extraction F1 | 97% | 97% | 97% |
+| agent quality flags | 0 | 0 | 2 (re-asked the urgency and consent questions) |
+| LLM fallbacks + overrides | 7 | 7 | 9 |
+| turns with pins · pins | 0 · 0 | 32 · 58 | – |
+| avg prompt size per call | 3,394 chars | 3,220 (−5%) | 3,061 (−10%) |
+
+   Reading it honestly: the gold scores don't move, because decisions come from state and code gates, not from the window. The only differences are in the weak-reply signals: without pins the agent repeated two questions and needed two more code overrides; with pins it matched the 20-message baseline using a 4-message window. One run per setting on 9 short chats is within noise, so this says "no harm, likely helps", not "proven". The prompt saving is small because these chats are short and compact state is most of the prompt. The real test needs long chats (40+ messages, the key fact early) and several runs per setting.
+
+   **Long chats (`--set long`, 3 chats of 40 messages, `data/make_longchats.py`).** The seller gives a detail at message 2 that exists only in their words (originals held in Đồng Nai, about 3 weeks to transfer; lowest price 23tr5 with 2 helmets; a scratch on the left side and a battery replaced in March); the buyer asks for it again ~35 messages later. A new per-turn check scores the buyer's reply: it must state the detail and must not invent another (`reply_must_include`, `reply_must_not_include`). Three runs per setting, OpenAI gpt-6-luna:
+
+| | window 20, no pins | window 20 + pins | window 6 + pins |
+|---|---|---|---|
+| reply states the detail: pinned facts (paperwork, price) | 3/9 | 8/9 | **9/9** |
+| reply states the detail: not a state fact (condition) | 1/6 | 2/6 | 3/6 |
+| invented a different detail | 0 | 0 | 0 |
+| next-action accuracy (3 runs) | 100 · 100 · 100% | 100 · 100 · 91% | 100 · 91 · 82% |
+| avg prompt size per call | 4,414 chars | 4,663 (+6%) | 3,784 (−14%) |
+
+   What this shows:
+   - **Pins work where they are meant to.** For details behind a live fact, the reply went from 3/9 to 8/9, and to 9/9 with a 6-message window, which is also 14% cheaper per call. Without pins the agent said "em chưa có thông tin" (I don't have that yet); it never invented a number, which is the right failure.
+   - **Pins don't cover what never became a fact.** The scratch and the battery date aren't state fields, so they aren't pinned; they come through only when the LLM extractor happens to store them as a seller claim. The fix would be to keep condition claims as facts with a source, not a bigger window.
+   - **The first round found a real bug, unrelated to the window:** the LLM responder was never shown the message it was answering, so it replied "Dạ ạ." to "bao lâu thì sang tên?" in every setting. It now gets `MESSAGE_NOW` and is told to answer it first or say it doesn't have the detail. The table is from the run after that fix.
+   - **Not yet safe to shrink the window.** Next-action dipped in some pinned runs: twice the LLM extractor read "Ok em lấy giá đó" ("OK, I'll take that price") as `DROP`, and twice the planner searched after "em không gấp, đợi được". Neither appeared without pins, but 3 runs can't say whether pins cause them. Decision: **pins on, window stays at 20**; a `DROP` from the LLM should need a rule cue before it is accepted, then re-test window 6.
+   - **Fixed since:** an LLM `DROP` is now accepted only when the message has a withdrawal word ("không mua", "khỏi", "mua xe khác"…); "Ok em lấy giá đó" no longer closes the lead (`tests/test_signals.py`). Window 6 not re-tested yet.
+   - **Live web demo, viewing never arranged:** the buyer picked the seller's Vision, said "mai hoặc mốt thì đc", then "chiều mai 4h"; the agent only noted the time and told the buyer "chưa có kênh chat". Viewing consent came only from words like "xem xe" / "kết nối", and no step asked the seller anything. Now a day or time for a bike already picked counts as wanting to view; when the bike's seller is in the chat, the time and the place are each proposed by one side and must be agreed by the other ("ok 3h", "ok quận 1 được") before `book_appointment` is allowed; a time without an hour ("tomorrow afternoon" from the LLM) is rejected, and changing a booked time unbooks it until it is agreed again. A second live chat had booked the seller's "hẹn khách ở quận 1 được ko" with no hour and without the buyer, then told the buyer "đã chốt lịch lúc 3 giờ" without asking the seller; "đã chốt lịch" is now a promise the reply guard checks. A third chat was booked "ở Q1" while the buyer asked for the exact address: an area ("Q1", "Phú Nhuận") is no longer a bookable place; the seller is asked for a street address in it, which keeps the buyer's agreement ("12 Lê Lợi, Quận 1"). "Hỏi chủ xe thử …" is now relayed to the seller word for word, and the LLM may say it asked the seller only when that question was actually sent (`tests/test_pinned_anchors.py`).
 
    Next: the same run on `anthropic:claude-opus-5-5` and a local `ollama:` model, with latency and cost per turn.
 3. **Circuit breaker** in the LLM client (stop calling after N consecutive failures).
