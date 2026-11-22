@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketplace Agent Demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="lobby">
+  <h1>Motorbike marketplace agent</h1>
+  <p class="muted">A live 3-way chat. Open the buyer and the seller in two tabs (or two devices). The agent
+    reads every message, updates its state, and replies to whoever it needs to.</p>
+  <p class="muted" id="info"></p>
+
+  <section class="card">
+    <h2 style="margin:0 0 4px;font-size:18px">1. Pick the seller in this chat</h2>
+    <p class="muted" style="margin:0">Choose “no seller” to start with a buyer who is still searching.</p>
+    <div class="sellers" id="sellers"><p class="empty">Loading…</p></div>
+    <button class="primary" id="start">Start conversation</button>
+    <div id="result" hidden>
+      <h2 style="margin:20px 0 4px;font-size:18px">2. Open both sides</h2>
+      <p class="muted" style="margin:0">Each link opens a separate participant. Share the seller link with someone else to play the seller.</p>
+      <div class="links">
+        <a id="buyer-link" target="_blank" rel="noopener"><strong>Buyer</strong><span class="muted">open in new tab</span></a>
+        <a id="seller-link" target="_blank" rel="noopener"><strong>Seller</strong><span class="muted">open in new tab</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card tips">
+    <h2 style="margin:0 0 8px;font-size:18px">Things to try</h2>
+    <ul>
+      <li>No seller · buyer: <i>Mình tìm Yamaha tay ga tầm 25 củ ở Hà Nội</i> (the agent says which filter blocks results)</li>
+      <li>Seller s_001 · buyer: <i>Air Blade này còn không anh, budget em 30m thôi</i>, then seller: <i>bớt còn 31 triệu</i></li>
+      <li>Seller s_001 · seller: <i>em ck cọc qua stk 0123456789012 nhé</i> (escalated; the buyer sees the account masked)</li>
+      <li>Seller s_002 · buyer: <i>Xe Vision này còn không anh, có bị thủy kích không?</i> (papers pending → escalation)</li>
+      <li>Seller s_003 · seller: <i>Mình chỉ bán trực tiếp, không qua trung gian, cho mình số người mua</i></li>
+    </ul>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function load() {
+  const [info, sellers] = await Promise.all([
+    fetch("/api/info").then((r) => r.json()),
+    fetch("/api/sellers").then((r) => r.json()),
+  ]);
+  $("info").textContent = `Agent mode: ${info.mode} · LLM: ${info.llm}`;
+  const box = $("sellers");
+  box.innerHTML = "";
+  const opts = [{ id: "", listings: ["Buyer is searching; the agent searches the inventory"] }, ...sellers];
+  opts.forEach((s, i) => {
+    const label = document.createElement("label");
+    label.className = "seller";
+    const input = Object.assign(document.createElement("input"), { type: "radio", name: "seller", value: s.id, checked: i === 0 });
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = s.id || "No seller";
+    const sub = document.createElement("div");
+    sub.className = "muted";
+    sub.style.fontSize = "13px";
+    sub.textContent = s.listings.join(" | ");
+    text.append(name, sub);
+    label.append(input, text);
+    box.append(label);
+  });
+}
+
+$("start").addEventListener("click", async () => {
+  $("start").disabled = true;
+  const seller = document.querySelector("input[name=seller]:checked")?.value || null;
+  const res = await fetch("/api/conversations", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seller }),
+  }).then((r) => r.json());
+  $("buyer-link").href = `/chat?conv=${res.conv}&role=buyer`;
+  $("seller-link").href = `/chat?conv=${res.conv}&role=seller`;
+  $("result").hidden = false;
+  $("start").disabled = false;
+  $("start").textContent = "Start another conversation";
+});
+
+load().catch((e) => { $("sellers").textContent = "Could not reach the server: " + e; });
+</script>
+</body>
+</html>

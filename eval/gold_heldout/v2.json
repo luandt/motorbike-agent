@@ -1,0 +1,82 @@
+{
+  "objection": "held-out paperwork case plus a deposit request",
+  "turns": [
+    {
+      "after_msg": "v2#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "escalate_to_human"
+      ],
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING"
+    },
+    {
+      "after_msg": "v2#2",
+      "acceptable_actions": [
+        "escalate_to_human",
+        "ask_clarification",
+        "respond_only"
+      ],
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING"
+    },
+    {
+      "after_msg": "v2#3",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "buyer can wait for papers"
+    },
+    {
+      "after_msg": "v2#4",
+      "acceptable_actions": [
+        "escalate_to_human"
+      ],
+      "required_actions": [
+        "escalate_to_human"
+      ],
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "deposit before viewing on a bike with pending papers"
+    }
+  ],
+  "expected_final_state": {
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 24000,
+    "listing.ask_price": 21000000,
+    "listing.paperwork_status": "pending_original_docs",
+    "constraints.urgency": "can_wait"
+  },
+  "expected_final_stage": "MATCHING",
+  "expected_open_risks": [
+    "DEPOSIT_REQUEST",
+    "PAPERWORK_PENDING"
+  ],
+  "case_id": "v2",
+  "sources": [
+    "data/heldout.jsonl"
+  ],
+  "conversation_id": "v2"
+}

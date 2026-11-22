@@ -1,0 +1,21 @@
+# Live demo script: python run.py chat < demo/live_demo.txt
+# (or type the lines yourself in: python run.py chat)
+
+# 1. Search with no seller yet: the agent says which filter blocks results
+b: Mình tìm Yamaha tay ga tầm 25 củ ở Hà Nội
+b: Ok mình xem được ở Sài Gòn, đời 2020 đổ lên
+/state
+
+# 2. A chat with seller s_001 (Air Blade 2021, 32tr): price gap, deposit, bank transfer
+/seller s_001
+b: Air Blade này còn không anh, budget em 30m thôi
+s: còn em, bớt còn 31 triệu
+b: chuyển khoản cọc trước 5 triệu được không anh
+s: ok em ck cọc qua stk 0123456789012 nhé
+/state
+
+# 3. A chat with seller s_002 (Vision 2020, papers pending): paperwork, contact sharing, redaction
+/seller s_002
+b: Xe Vision này còn không anh, có bị thủy kích không?
+s: còn em, add zalo mình: không chín không chín một hai ba bốn năm sáu bảy nha, zalo id vinh.honda88
+/events 3

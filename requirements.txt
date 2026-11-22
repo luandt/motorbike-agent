@@ -1,0 +1,9 @@
+pydantic>=2.6
+pytest>=8
+# optional LLM providers: install the ones you use (--llm provider:model)
+anthropic>=0.111      # anthropic:<model> (default)
+openai>=2.0           # openai:, ollama:, openrouter:, deepseek:, groq:, compatible:
+google-genai>=1.75    # gemini:<model>
+# browser demo (python run.py web)
+fastapi>=0.110
+uvicorn>=0.29

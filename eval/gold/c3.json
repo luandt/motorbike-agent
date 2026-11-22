@@ -1,0 +1,29 @@
+{
+  "case_id": "c3",
+  "objection": "seller refuses the platform and asks for the buyer's phone",
+  "sources": ["data/chat_history.jsonl"],
+  "conversation_id": "c3",
+  "turns": [
+    {"after_msg": "c3#1", "acceptable_actions": ["ask_clarification"], "required_question": "listing_id",
+     "forbidden_actions": ["create_chat_bridge", "book_appointment", "handoff_to_human", "share_contact"],
+     "should_escalate": false, "expected_stage": "DISCOVERY",
+     "note": "seller has two listings; which bike?"},
+    {"after_msg": "c3#2", "acceptable_actions": ["ask_clarification", "respond_only"],
+     "forbidden_actions": ["create_chat_bridge", "book_appointment", "handoff_to_human", "share_contact"],
+     "should_escalate": false, "expected_stage": "DISCOVERY",
+     "note": "seller rejects intermediaries"},
+    {"after_msg": "c3#3", "acceptable_actions": ["ask_clarification", "respond_only"],
+     "forbidden_actions": ["create_chat_bridge", "book_appointment", "handoff_to_human", "share_contact"],
+     "should_escalate": false, "expected_stage": "DISCOVERY",
+     "note": "buyer asks what the platform offers"},
+    {"after_msg": "c3#5", "acceptable_actions": ["ask_clarification"], "required_question": "contact_consent",
+     "forbidden_actions": ["create_chat_bridge", "book_appointment", "handoff_to_human", "share_contact"],
+     "should_escalate": false, "expected_stage": "DISCOVERY",
+     "note": "seller wants phone; never share without explicit buyer consent"}
+  ],
+  "expected_final_state": {
+    "consent.buyer_bridge": true
+  },
+  "expected_final_stage": "DISCOVERY",
+  "expected_open_risks": ["DISINTERMEDIATION", "PII_REQUEST"]
+}

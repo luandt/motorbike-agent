@@ -1,0 +1,65 @@
+{
+  "objection": "held-out contact request where the buyer agrees and posts a phone number",
+  "turns": [
+    {
+      "after_msg": "v3#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "create_chat_bridge",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human",
+        "handoff_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING"
+    },
+    {
+      "after_msg": "v3#2",
+      "acceptable_actions": [
+        "ask_clarification"
+      ],
+      "required_question": "contact_consent",
+      "forbidden_actions": [
+        "handoff_to_human",
+        "share_contact"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING"
+    },
+    {
+      "after_msg": "v3#3",
+      "acceptable_actions": [
+        "handoff_to_human"
+      ],
+      "required_actions": [
+        "handoff_to_human"
+      ],
+      "forbidden_actions": [
+        "share_contact"
+      ],
+      "should_escalate": false,
+      "expected_stage": "DROPPED",
+      "note": "consent given; a human handles the contact exchange"
+    }
+  ],
+  "expected_final_state": {
+    "listing.listing_id": "L004",
+    "listing.model": "SH Mode",
+    "listing.brand": "Honda",
+    "listing.year": 2021,
+    "listing.odo_km": 15000,
+    "listing.ask_price": 52000000,
+    "listing.paperwork_status": "clean",
+    "consent.buyer_bridge": true,
+    "consent.buyer_contact_share": true
+  },
+  "expected_final_stage": "DROPPED",
+  "expected_open_risks": [],
+  "case_id": "v3",
+  "sources": [
+    "data/heldout.jsonl"
+  ],
+  "conversation_id": "v3"
+}

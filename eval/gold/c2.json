@@ -1,0 +1,85 @@
+{
+  "case_id": "c2",
+  "objection": "paperwork risk: original documents pending, no transfer yet",
+  "sources": [
+    "data/chat_history.jsonl"
+  ],
+  "conversation_id": "c2",
+  "turns": [
+    {
+      "after_msg": "c2#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "escalate_to_human"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "buyer asks about papers; listing record already says pending -> verify and escalate"
+    },
+    {
+      "after_msg": "c2#2",
+      "acceptable_actions": [
+        "escalate_to_human",
+        "ask_clarification",
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "seller confirms papers not ready"
+    },
+    {
+      "after_msg": "c2#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "escalate_to_human"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "buyer asks 'any risk?': answering it directly is correct (respond_only added after review; the original label wrongly required a tool or a question)"
+    },
+    {
+      "after_msg": "c2#5",
+      "acceptable_actions": [
+        "ask_clarification",
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment"
+      ],
+      "should_escalate": true,
+      "expected_stage": "MATCHING",
+      "note": "seller says not suitable for urgent transfer; ask buyer urgency"
+    }
+  ],
+  "expected_final_state": {
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.paperwork_status": "pending_original_docs",
+    "constraints.deal_breakers": [
+      "paperwork_issue"
+    ],
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 24000,
+    "listing.ask_price": 21000000
+  },
+  "expected_final_stage": "MATCHING",
+  "expected_open_risks": [
+    "PAPERWORK_PENDING"
+  ]
+}

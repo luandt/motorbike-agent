@@ -1,0 +1,69 @@
+{
+  "case_id": "c1_followup",
+  "objection": "price gap resolved by switching to an in-budget alternative, then booking",
+  "sources": [
+    "data/chat_history.jsonl",
+    "data/c1_followup.jsonl"
+  ],
+  "conversation_id": "c1",
+  "turns": [
+    {
+      "after_msg": "c1#8",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "create_chat_bridge"
+      ],
+      "required_actions": [
+        "create_chat_bridge"
+      ],
+      "forbidden_actions": [
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "buyer picks the Lead 2021 at 26tr and wants to view"
+    },
+    {
+      "after_msg": "c1#9",
+      "acceptable_actions": [
+        "book_appointment"
+      ],
+      "required_actions": [
+        "book_appointment"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "APPOINTMENT",
+      "note": "time and place given"
+    }
+  ],
+  "expected_final_state": {
+    "constraints.budget_max": 26000000,
+    "listing.listing_id": "L005",
+    "listing.model": "Lead",
+    "listing.ask_price": 26000000,
+    "appointment.proposed_place": "Quận 3",
+    "appointment.status": "booked",
+    "constraints.budget_flexibility": "firm",
+    "negotiation.buyer_stance": "firm",
+    "constraints.location": "HCM",
+    "constraints.vehicle_type": "scooter",
+    "constraints.brands": [
+      "Honda",
+      "Yamaha"
+    ],
+    "constraints.year_min": 2020,
+    "constraints.odo_pref": "low",
+    "constraints.condition_pref": "good_looking",
+    "listing.brand": "Honda",
+    "listing.year": 2021,
+    "listing.odo_km": 12000,
+    "listing.paperwork_status": "clean",
+    "consent.buyer_bridge": true
+  },
+  "expected_final_stage": "APPOINTMENT",
+  "expected_open_risks": []
+}

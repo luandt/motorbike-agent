@@ -1,0 +1,170 @@
+{
+  "case_id": "x1",
+  "conversation_id": "x1",
+  "sources": [
+    "data/scenarios.jsonl"
+  ],
+  "objection": "live chat: buyer picks another seller's same-model bike; seller answers with a relative discount",
+  "turns": [
+    {
+      "after_msg": "x1#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "ask_clarification"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L008",
+      "required_question": "budget"
+    },
+    {
+      "after_msg": "x1#2",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "required_actions": [
+        "search_listings"
+      ],
+      "note": "gap 22%: show alternatives, ask this seller for a floor"
+    },
+    {
+      "after_msg": "x1#3",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "escalate_to_human",
+        "ask_clarification"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ],
+      "required_question": "other_seller",
+      "note": "'cũng okie' = the Vision 2020 just shown; it belongs to s_002, so never ask s_008 about it"
+    },
+    {
+      "after_msg": "x1#4",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ],
+      "note": "'bớt 500k' is s_008's floor on L008 (24tr); relayed, selection unchanged"
+    },
+    {
+      "after_msg": "x1#5",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ]
+    },
+    {
+      "after_msg": "x1#6",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ]
+    },
+    {
+      "after_msg": "x1#7",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ],
+      "note": "'21t mà' is the bike's price, not a new budget"
+    },
+    {
+      "after_msg": "x1#8",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ]
+    }
+  ],
+  "expected_final_state": {
+    "constraints.budget_max": 20000000,
+    "constraints.budget_flexibility": "approx",
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 24000,
+    "listing.ask_price": 21000000,
+    "listing.paperwork_status": "pending_original_docs"
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PAPERWORK_PENDING",
+    "PRICE_GAP"
+  ]
+}

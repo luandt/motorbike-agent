@@ -1,0 +1,35 @@
+{
+  "_note": "Who is in each 3-way chat. In production this comes from the chat service, not from the text.",
+  "c1": {
+    "buyer_id": "b_001",
+    "seller_id": "s_001"
+  },
+  "c2": {
+    "buyer_id": "b_002",
+    "seller_id": "s_002"
+  },
+  "c3": {
+    "buyer_id": "b_003",
+    "seller_id": "s_003"
+  },
+  "v1": {
+    "buyer_id": "b_101",
+    "seller_id": "s_009"
+  },
+  "v2": {
+    "buyer_id": "b_102",
+    "seller_id": "s_002"
+  },
+  "v3": {
+    "buyer_id": "b_103",
+    "seller_id": "s_003"
+  },
+  "x1": {
+    "buyer_id": "b_201",
+    "seller_id": "s_008"
+  },
+  "x2": {
+    "buyer_id": "b_202",
+    "seller_id": "s_008"
+  }
+}

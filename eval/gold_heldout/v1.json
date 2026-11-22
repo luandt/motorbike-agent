@@ -1,0 +1,101 @@
+{
+  "objection": "held-out price talk with slang ('30 củ', 'AB', '27tr5') and a counter-offer",
+  "turns": [
+    {
+      "after_msg": "v1#1",
+      "acceptable_actions": [
+        "ask_clarification",
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "budget, type and location known (coverage 60%): search now, ask brand/year alongside"
+    },
+    {
+      "after_msg": "v1#2",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING"
+    },
+    {
+      "after_msg": "v1#3",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human",
+        "book_appointment"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "seller names their bike: identify and verify it (tightened after the agent passed this with respond_only)",
+      "required_actions": [
+        "get_listing_detail"
+      ]
+    },
+    {
+      "after_msg": "v1#4",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human",
+        "book_appointment"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "25 is a counter-offer, not a new budget; relay it to the seller"
+    },
+    {
+      "after_msg": "v1#5",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only",
+        "create_chat_bridge"
+      ],
+      "forbidden_actions": [
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "seller floor 26tr"
+    }
+  ],
+  "expected_final_state": {
+    "constraints.budget_max": 30000000,
+    "constraints.budget_flexibility": "approx",
+    "constraints.location": "HCM",
+    "constraints.vehicle_type": "scooter",
+    "constraints.brands": [
+      "Honda"
+    ],
+    "constraints.year_min": 2019,
+    "listing.listing_id": "L009",
+    "listing.model": "Air Blade",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 27000,
+    "listing.ask_price": 27500000,
+    "listing.seller_floor": 26000000,
+    "listing.paperwork_status": "clean",
+    "negotiation.buyer_offer": 25000000
+  },
+  "expected_final_stage": "MATCHING",
+  "expected_open_risks": [],
+  "case_id": "v1",
+  "sources": [
+    "data/heldout.jsonl"
+  ],
+  "conversation_id": "v1"
+}

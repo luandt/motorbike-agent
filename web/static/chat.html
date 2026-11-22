@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketplace Chat</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <section class="chat">
+    <header class="bar">
+      <a href="/" title="Lobby">←</a>
+      <span class="who" id="who">Connecting…</span>
+      <span class="pill" id="other">offline</span>
+      <button class="panel-toggle" id="toggle">Agent view</button>
+    </header>
+    <div class="listing-line" id="listing"></div>
+    <div class="messages" id="messages" aria-live="polite"></div>
+    <div class="thinking" id="thinking"></div>
+    <div class="composer">
+      <div class="samples" id="samples"></div>
+      <form id="form">
+        <textarea id="input" placeholder="Nhập tin nhắn…" autocomplete="off"></textarea>
+        <button class="primary" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel">
+    <h2>Agent</h2>
+    <div class="muted mono" id="engine">-</div>
+    <h2>Stage</h2>
+    <div class="stage" id="stage">-</div>
+    <div class="muted" style="font-size:13px" id="coverage-text"></div>
+    <div class="meter"><div id="coverage" style="width:0"></div></div>
+    <h2>Risks</h2>
+    <div class="chips" id="risks"><span class="empty">none</span></div>
+    <h2>Last turn</h2>
+    <div id="turn"><p class="empty">No messages yet.</p></div>
+    <h2>Buyer constraints</h2>
+    <dl class="kv" id="constraints"></dl>
+    <h2>Listing &amp; negotiation</h2>
+    <dl class="kv" id="deal"></dl>
+    <h2>Open questions</h2>
+    <div class="chips" id="questions"><span class="empty">none</span></div>
+    <h2>Summary (agent memory)</h2>
+    <p style="font-size:13px;margin:0" id="summary">-</p>
+  </aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const conv = params.get("conv");
+const role = params.get("role") === "seller" ? "seller" : "buyer";
+const other = role === "buyer" ? "seller" : "buyer";
+const NAMES = { buyer: "Buyer", seller: "Seller" };
+
+const SAMPLES = {
+  buyer: [
+    "Mình tìm Yamaha tay ga tầm 25 củ ở Hà Nội",
+    "Ok mình xem được ở Sài Gòn, đời 2020 đổ lên",
+    "Xe này còn không anh, budget em 30m thôi",
+    "Có bị thủy kích hay tai nạn gì không?",
+    "chuyển khoản cọc trước 5 triệu được không anh",
+    "Mình muốn xem xe, thứ 7 này 10h sáng ở Quận 3",
+  ],
+  seller: [
+    "Còn em, bớt còn 31 triệu",
+    "Giá đó là giá cuối rồi, khó giảm sâu",
+    "Giấy tờ đang chờ rút hồ sơ gốc, tầm 2 tuần",
+    "ok em ck cọc qua stk 0123456789012 nhé",
+    "Mình chỉ bán trực tiếp, không qua trung gian, cho mình số người mua",
+    "zalo mình 0909 123 456 nhé",
+  ],
+};
+
+document.title = `${NAMES[role]} · Marketplace Chat`;
+$("who").textContent = `You are the ${NAMES[role].toLowerCase()}`;
+$("toggle").addEventListener("click", () => $("app").classList.toggle("show-panel"));
+
+for (const s of SAMPLES[role]) {
+  const b = Object.assign(document.createElement("button"), { type: "button", textContent: s });
+  b.addEventListener("click", () => { $("input").value = s; $("input").focus(); });
+  $("samples").append(b);
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function addMessage(kind, label, text) {
+  const m = el("div", "msg " + kind);
+  if (label) m.append(el("div", "label", label));
+  m.append(el("div", "bubble", text));
+  $("messages").append(m);
+  $("messages").scrollTop = $("messages").scrollHeight;
+}
+
+function kv(target, rows) {
+  target.innerHTML = "";
+  if (!rows.length) { target.append(el("dd", "empty", "nothing yet")); return; }
+  for (const [k, v] of rows) { target.append(el("dt", "", k), el("dd", "", v)); }
+}
+
+function chips(target, items, cls) {
+  target.innerHTML = "";
+  if (!items.length) { target.append(el("span", "empty", "none")); return; }
+  for (const it of items) {
+    const c = el("span", "chip " + (cls ? cls(it) : ""), typeof it === "string" ? it : it.text);
+    if (it.title) c.title = it.title;
+    target.append(c);
+  }
+}
+
+function renderState(s) {
+  $("stage").textContent = s.stage;
+  $("coverage").style.width = Math.round(s.coverage * 100) + "%";
+  $("coverage-text").textContent = `requirements known: ${Math.round(s.coverage * 100)}%`;
+  chips($("risks"), s.risks.map((r) => ({
+          text: `${r.type} · ${r.status}` + (r.listing_id ? ` · ${r.listing_id}` : "") + (r.applies === false ? " (other bike)" : ""),
+          title: r.note, severity: r.applies === false ? "" : r.severity })),
+        (r) => r.severity);
+  kv($("constraints"), s.constraints.map((c) => [c.field, `${Array.isArray(c.value) ? c.value.join(", ") : c.value}  (${c.source})`]));
+  const deal = [];
+  if (s.listing) {
+    const l = s.listing;
+    deal.push(["listing", `${l.id || "?"} ${l.model || ""} ${l.year || ""}`]);
+    if (l.ask) deal.push(["ask price", l.ask]);
+    if (l.floor) deal.push(["seller floor", l.floor]);
+    if (l.paperwork) deal.push(["paperwork", l.paperwork]);
+  }
+  if (s.negotiation.gap !== null) deal.push(["price gap", Math.round(s.negotiation.gap * 100) + "%"]);
+  if (s.negotiation.buyer_offer) deal.push(["buyer offer", s.negotiation.buyer_offer]);
+  if (s.negotiation.seller_stance) deal.push(["seller stance", s.negotiation.seller_stance]);
+  if (s.candidates.length) deal.push(["alternatives", s.candidates.join("; ")]);
+  if (s.channel) deal.push(["chat channel", s.channel]);
+  if (s.appointment) deal.push(["viewing", `${s.appointment.status} ${s.appointment.time || ""} ${s.appointment.place || ""}`]);
+  kv($("deal"), deal);
+  chips($("questions"), s.open_questions);
+  $("summary").textContent = s.summary || "-";
+}
+
+function renderTurn(t) {
+  const box = $("turn");
+  box.innerHTML = "";
+  box.append(el("div", "muted", `${t.msg_id} from ${t.from}` + (t.intents.length ? ` · ${t.intents.join(", ")}` : "")));
+  for (const f of t.facts) {
+    box.append(el("div", "fact", `+ ${f.field} = ${JSON.stringify(f.value)} (${f.conf})`));
+  }
+  for (const r of t.risks) {
+    box.append(el("div", "fact", `! ${r.type} [${r.severity}] ${r.note}`));
+  }
+  for (const a of t.actions) {
+    const d = el("div", "action");
+    const detail = typeof a.detail === "string" ? a.detail : (a.detail && Object.keys(a.detail).length ? JSON.stringify(a.detail) : "");
+    d.append(el("b", "", a.name), document.createTextNode(detail ? " " + detail : ""));
+    d.append(el("div", "why", a.reason));
+    box.append(d);
+  }
+  for (const f of t.signals || []) {
+    box.append(el("div", "fact signal", `⚠ ${f.type}: ${f.note}` + (f.blames ? ` (blames ${f.blames})` : "")));
+  }
+  const blocked = Object.entries(t.blocked || {});
+  if (blocked.length) {
+    const det = el("details");
+    det.append(el("summary", "", `${blocked.length} action(s) blocked by policy`));
+    for (const [k, v] of blocked) det.append(el("div", "fact", `${k}: ${v}`));
+    box.append(det);
+  }
+}
+
+let ws;
+function connect() {
+  if (!conv) { addMessage("system", "", "No conversation id. Start one from the lobby."); return; }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(conv)}/${role}`);
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    switch (m.type) {
+      case "hello": {
+        $("engine").textContent = `mode ${m.mode} · llm ${m.llm} · conversation ${m.conv}`;
+        $("listing").textContent = m.seller
+          ? `Seller ${m.seller}: ` + m.listings.map((l) => `${l.model} ${l.year} · ${l.price / 1e6}tr (${l.listing_id})`).join(" | ")
+          : "No seller yet: the buyer is searching the inventory.";
+        break;
+      }
+      case "message":
+        if (m.from === role) addMessage("me", "You", m.text);
+        else addMessage("them", NAMES[m.from], m.text);
+        break;
+      case "agent":
+        addMessage("agent", "Agent · to you", m.text);
+        break;
+      case "turn": renderTurn(m); break;
+      case "state": renderState(m.state); break;
+      case "busy": $("thinking").textContent = m.on ? "Agent is reading the message…" : ""; break;
+      case "presence": {
+        const on = m.online.includes(other);
+        $("other").textContent = `${NAMES[other].toLowerCase()} ${on ? "online" : "offline"}`;
+        $("other").className = "pill" + (on ? " online" : "");
+        break;
+      }
+      case "error": addMessage("system", "", m.text); break;
+    }
+  };
+  ws.onclose = () => {
+    $("other").textContent = "disconnected";
+    $("other").className = "pill";
+  };
+}
+
+$("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = $("input").value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ text }));
+  $("input").value = "";
+});
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+});
+
+connect();
+</script>
+</body>
+</html>

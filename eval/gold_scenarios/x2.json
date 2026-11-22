@@ -1,0 +1,115 @@
+{
+  "case_id": "x2",
+  "conversation_id": "x2",
+  "sources": [
+    "data/scenarios.jsonl"
+  ],
+  "objection": "live chat: buyer looks at another seller's bike, then returns to the seller's own bike",
+  "turns": [
+    {
+      "after_msg": "x2#1",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "ask_clarification"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "expected_listing": "L008",
+      "required_question": "budget"
+    },
+    {
+      "after_msg": "x2#2",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "required_actions": [
+        "search_listings"
+      ]
+    },
+    {
+      "after_msg": "x2#3",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "escalate_to_human",
+        "ask_clarification"
+      ],
+      "should_escalate": true,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L002",
+      "forbidden_actions": [
+        "book_appointment",
+        "create_chat_bridge"
+      ],
+      "forbidden_questions": [
+        "seller_floor_price",
+        "relay_offer",
+        "condition_history"
+      ],
+      "required_question": "other_seller"
+    },
+    {
+      "after_msg": "x2#4",
+      "acceptable_actions": [
+        "ask_clarification"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "required_question": "seller_floor_price",
+      "forbidden_questions": [
+        "urgency",
+        "other_seller"
+      ],
+      "note": "back on L008 (clean papers): ask s_008 for a floor; L002's paper risk no longer applies"
+    },
+    {
+      "after_msg": "x2#5",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "required_question": "accept_floor"
+    },
+    {
+      "after_msg": "x2#6",
+      "acceptable_actions": [
+        "ask_clarification",
+        "respond_only"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "expected_listing": "L008",
+      "forbidden_questions": [
+        "brands_year",
+        "budget",
+        "location"
+      ],
+      "note": "'cần trong tuần này' answers urgency; no filler question once a bike is chosen"
+    }
+  ],
+  "expected_final_state": {
+    "constraints.budget_max": 20000000,
+    "constraints.budget_flexibility": "approx",
+    "constraints.urgency": "transfer_now",
+    "listing.listing_id": "L008",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2022,
+    "listing.odo_km": 8000,
+    "listing.ask_price": 24500000,
+    "listing.seller_floor": 23500000,
+    "listing.paperwork_status": "clean",
+    "negotiation.seller_stance": "firm"
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PRICE_GAP"
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "case_id": "c1",
+  "objection": "price gap: seller 32tr vs buyer max 25-26tr",
+  "sources": [
+    "data/chat_history.jsonl"
+  ],
+  "conversation_id": "c1",
+  "turns": [
+    {
+      "after_msg": "c1#1",
+      "acceptable_actions": [
+        "ask_clarification",
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "budget, type and location known (coverage 60%): search now, ask brand/year alongside"
+    },
+    {
+      "after_msg": "c1#3",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "MATCHING",
+      "note": "enough to search"
+    },
+    {
+      "after_msg": "c1#4",
+      "acceptable_actions": [
+        "get_listing_detail",
+        "ask_clarification",
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "note": "seller asks 32tr, about 28% over the budget"
+    },
+    {
+      "after_msg": "c1#5",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "required_actions": [
+        "search_listings"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "note": "budget updated to 26tr firm; gap 23% -> must offer in-budget alternatives"
+    },
+    {
+      "after_msg": "c1#7",
+      "acceptable_actions": [
+        "search_listings",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_stage": "NEGOTIATION",
+      "note": "seller firm; stop pushing seller, steer buyer to alternatives"
+    }
+  ],
+  "expected_final_state": {
+    "constraints.budget_max": 26000000,
+    "constraints.location": "HCM",
+    "constraints.vehicle_type": "scooter",
+    "constraints.brands": [
+      "Honda",
+      "Yamaha"
+    ],
+    "constraints.year_min": 2020,
+    "constraints.odo_pref": "low",
+    "constraints.condition_pref": "good_looking",
+    "listing.listing_id": "L001",
+    "listing.model": "Air Blade",
+    "listing.year": 2021,
+    "listing.odo_km": 19000,
+    "listing.ask_price": 32000000,
+    "listing.paperwork_status": "clean",
+    "negotiation.seller_stance": "firm",
+    "constraints.budget_flexibility": "firm",
+    "negotiation.buyer_stance": "firm",
+    "listing.brand": "Honda"
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PRICE_GAP"
+  ]
+}
