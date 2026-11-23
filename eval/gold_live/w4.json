@@ -1,0 +1,217 @@
+{
+  "case_id": "w4",
+  "conversation_id": "w4",
+  "sources": [
+    "data/livechats.jsonl"
+  ],
+  "objection": "recommendation after a skipped brand question; an area (Q1) is not an address; 'hỏi chủ xe' is passed on",
+  "expected_final_state": {
+    "constraints.budget_max": 27000000,
+    "constraints.budget_flexibility": "approx",
+    "constraints.location": "HCM",
+    "constraints.brands": [
+      "Honda"
+    ],
+    "listing.listing_id": "L009",
+    "listing.model": "Air Blade",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 27000,
+    "listing.ask_price": 27500000,
+    "listing.seller_floor": 27000000,
+    "listing.paperwork_status": "clean",
+    "consent.buyer_bridge": true,
+    "appointment.proposed_place": "12 Lê Lợi, Quận 1",
+    "appointment.status": "booked"
+  },
+  "expected_final_stage": "APPOINTMENT",
+  "expected_open_risks": [
+    "PRICE_GAP"
+  ],
+  "turns": [
+    {
+      "after_msg": "w4#1",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#2",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_actions": [
+        "search_listings"
+      ],
+      "reply_must_include": [
+        [
+          "air blade",
+          "ab"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w4#4",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#5",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#7",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#8",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w4#9",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "forbidden_actions": [
+        "book_appointment"
+      ]
+    },
+    {
+      "after_msg": "w4#10",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "forbidden_actions": [
+        "book_appointment"
+      ],
+      "seller_reply_must_include": [
+        [
+          "địa chỉ"
+        ]
+      ],
+      "reply_must_not_include": [
+        "đã chốt",
+        "đã đặt lịch"
+      ]
+    },
+    {
+      "after_msg": "w4#11",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "forbidden_actions": [
+        "book_appointment"
+      ],
+      "seller_reply_must_include": [
+        [
+          "địa chỉ",
+          "đường"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w4#12",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_actions": [
+        "book_appointment"
+      ],
+      "reply_must_include": [
+        [
+          "lê lợi"
+        ]
+      ]
+    }
+  ]
+}

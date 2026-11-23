@@ -1,0 +1,149 @@
+{
+  "case_id": "w2",
+  "conversation_id": "w2",
+  "sources": [
+    "data/livechats.jsonl"
+  ],
+  "objection": "a day, then an hour for the seller's own bike: the seller must be asked to confirm before anything is booked",
+  "expected_final_state": {
+    "constraints.budget_max": 25000000,
+    "constraints.budget_flexibility": "approx",
+    "constraints.location": "HCM",
+    "constraints.vehicle_type": "scooter",
+    "constraints.condition_pref": "good_looking",
+    "listing.listing_id": "L008",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2022,
+    "listing.odo_km": 8000,
+    "listing.ask_price": 24500000,
+    "listing.paperwork_status": "clean",
+    "consent.buyer_bridge": true,
+    "appointment.proposed_place": "25 Phan Xích Long",
+    "appointment.status": "booked"
+  },
+  "expected_final_stage": "APPOINTMENT",
+  "expected_open_risks": [],
+  "turns": [
+    {
+      "after_msg": "w2#1",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w2#2",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w2#4",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_not_include": [
+        "kênh chat"
+      ]
+    },
+    {
+      "after_msg": "w2#5",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_question": "appointment_confirm",
+      "forbidden_actions": [
+        "book_appointment"
+      ],
+      "seller_reply_must_include": [
+        [
+          "16h",
+          "4h",
+          "16 giờ",
+          "4 giờ"
+        ]
+      ],
+      "reply_must_not_include": [
+        "kênh chat",
+        "đã chốt",
+        "đã đặt lịch"
+      ]
+    },
+    {
+      "after_msg": "w2#6",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_question": "appointment_ok",
+      "forbidden_actions": [
+        "book_appointment"
+      ],
+      "reply_must_include": [
+        [
+          "phan xích long"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w2#7",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_actions": [
+        "book_appointment"
+      ],
+      "reply_must_include": [
+        [
+          "phan xích long"
+        ]
+      ],
+      "seller_reply_must_include": [
+        [
+          "phan xích long"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "case_id": "w1",
+  "conversation_id": "w1",
+  "sources": [
+    "data/livechats.jsonl"
+  ],
+  "objection": "paperwork question on another seller's bike, then the buyer asks three times whether the seller was asked for a discount",
+  "expected_final_state": {
+    "constraints.budget_max": 20000000,
+    "constraints.budget_flexibility": "approx",
+    "listing.listing_id": "L008",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2022,
+    "listing.odo_km": 8000,
+    "listing.ask_price": 24500000,
+    "listing.paperwork_status": "clean",
+    "constraints.urgency": "can_wait"
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PRICE_GAP"
+  ],
+  "turns": [
+    {
+      "after_msg": "w1#1",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w1#2",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": true,
+      "expected_listing": "L002"
+    },
+    {
+      "after_msg": "w1#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w1#4",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_listing": "L008",
+      "required_question": "seller_floor_price"
+    },
+    {
+      "after_msg": "w1#5",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "expected_listing": "L008",
+      "seller_reply_must_include": [
+        [
+          "giảm",
+          "bớt",
+          "thấp nhất"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w1#6",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    }
+  ]
+}

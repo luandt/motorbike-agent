@@ -38,6 +38,16 @@ def _contained(a: str, b: str, ratio: float) -> bool:
     return len(ta) >= 3 and len(ta & tb) / len(ta) >= ratio
 
 
+def repeats(a: str, b: str, ratio: float = 0.85) -> bool:
+    """`a` says again what `b` said: the same text, or most of a's word pairs appear in b. Word pairs, not single
+    words: "Người bán đồng ý giờ 15h00" is news even when each word was in a longer earlier message."""
+    if a.strip() == b.strip():
+        return True
+    wa, wb = re.findall(r"\w+", N.fold(a)), re.findall(r"\w+", N.fold(b))
+    pa, pb = set(zip(wa, wa[1:])), set(zip(wb, wb[1:]))
+    return len(pa) >= 3 and len(pa & pb) / len(pa) >= ratio
+
+
 def _label(x: ListingRef) -> Optional[str]:
     return f"{x.model} {x.year}" if x and x.model and x.year else None
 
@@ -92,7 +102,7 @@ def detect(state: State, sender: str, text: str, intents: list[str], replies: li
             if sender == "buyer" and (intents or "?" in text or len(_tokens(text)) >= 3):
                 add("EMPTY_ACK", "agent", "medium", f"no answer to {text!r}")
             continue
-        if any(r.text == b or _contained(r.text, b, 0.9) for b in before):
+        if any(repeats(r.text, b) for b in before):
             add("AGENT_REPEAT", "agent", "low", f"same reply to the {r.to} again: {r.text[:80]!r}")
 
     names = wrong_bike([r.text for r in replies if r.to == "buyer"], state, allowed_ids)

@@ -11,7 +11,9 @@ python run.py replay --conv c1 --followup  # c1 continued until a viewing is boo
 python -m eval.run_eval --set dev          # evaluation against hand-labelled gold
 python -m eval.run_eval --set scenarios    # failures found in live chats
 python -m eval.run_eval --set long         # 40+ message chats: early details asked again late
-python -m pytest -q                        # 126 tests
+python -m eval.run_eval --set live         # the five live web chats where the agent went wrong
+python -m eval.run_eval --set live --replay eval/recordings/live_gpt-6-luna_1.json   # a recorded LLM run, replayed free
+python -m pytest -q                        # 154 tests
 python run.py web                          # live demo in the browser: buyer and seller in two tabs
 python run.py chat                         # same in the terminal: type as buyer (b: ...) or seller (s: ...); /help
 python run.py chat < demo/live_demo.txt    # scripted walkthrough of the risk cases
@@ -291,7 +293,12 @@ Each extracted item is a `Fact(field="constraints.budget_max", value=…, source
 #### Log important events
 All eight event types from the brief are produced: `USER_MESSAGE, AGENT_ACTION, TOOL_CALL, TOOL_RESULT, STATE_UPDATE, ESCALATION, HANDOFF, FEEDBACK` (`python run.py events --conv c2`).
 
-**Hybrid LLM mode:** the LLM extractor returns a Pydantic-validated schema. Rules keep the fields they found, the LLM adds what rules missed (numbers it adds are capped at 0.8 confidence), and intents and risks are merged.
+**Hybrid LLM mode:** the LLM extractor returns a Pydantic-validated schema, and the merge gives each side what it reads reliably (`agent/extractor.py: HybridExtractor`):
+- **The LLM decides meaning:** which bike, viewing consent, agreeing to a time or place, the viewing time and place, price stance, urgency. A rule reading of these is dropped. It is shown the agent's last message to the sender, so a bare "oki" is read as an answer to that message.
+- **The rules decide format:** when both read a field, the rules' value wins. Money, years and odometer come from the regex (a disagreement is counted), and fixed values like `good_looking` stay fixed instead of the LLM's "xe đẹp".
+- **The rules fill a silence:** when the LLM names no bike, the rules' bike pick is used.
+- **Code checks the LLM:** sharing the buyer's phone needs both readings to agree; a budget equal to a listed bike's price with no budget word is dropped ("Con Lead 2021 giá 26tr"); `DROP` needs a withdrawal word; a time without an hour is rejected; intents only the other side can have are dropped. Numbers only the LLM saw are capped at 0.8 confidence.
+- Risks are the union of both; any LLM failure falls back to the rules for that message.
 
 ---
 
@@ -299,10 +306,10 @@ All eight event types from the brief are produced: `USER_MESSAGE, AGENT_ACTION, 
 
 | Ability | Implementation | Example (actual output) |
 |---|---|---|
-| **Ask clarifying questions** | Questions come from `open_questions`, ranked by what unblocks the most; one per person; no repeats within 2 messages; a blocking question at most twice | c1#1: coverage 60% → *"Dạ bạn ưu tiên hãng nào và đời xe từ năm bao nhiêu ạ?"* |
+| **Ask clarifying questions** | Questions come from `open_questions`, ranked by what unblocks the most; one per person; no repeats within 2 messages (LLM planner included); a viewing question waits until that person answers; a blocking question at most twice, the second time as a reminder | c1#1: coverage 60% → *"Dạ bạn ưu tiên hãng nào và đời xe từ năm bao nhiêu ạ?"* |
 | **Decide when to search listings** | Budget plus one scope field and coverage ≥60% (a gate, so it binds the LLM too); or the gap is >15% (search alternatives); same arguments never searched twice; a narrower request searches again | c1#1 (coverage 60%) searches and asks brand/year alongside; c1#3 narrows to Honda/Yamaha 2020+ and searches again; c1#5, budget changes to 26tr firm → searches 22.1–27.3tr |
 | **Decide when to connect buyer ↔ seller** | Bridge only when the listing is verified, the buyer asked to view, there's no blocking risk, the seller isn't refusing the platform, and the gap is ≤10% | c1 follow-up: buyer picks the Lead 2021 at 26tr → verify → `create_chat_bridge` → ask for a time |
-| **Decide when to book appointments** | Channel open, time and place proposed, no blocking risk | *"Thứ 7 này 10h sáng ở Quận 3"* → `book_appointment` → stage APPOINTMENT |
+| **Decide when to book appointments** | Channel open, a time with an hour and a street address or landmark (not just an area), no blocking risk; when the bike's seller is in the chat, each side agrees to what the other proposed | *"Thứ 7 này 10h sáng ở Quận 3"* → `book_appointment` → stage APPOINTMENT; live chat w3: seller "ok 3h", buyer "ok quận 1 được", seller "12 Lê Lợi nha" → booked at 12 Lê Lợi, Quận 1 |
 | **Detect risk cases and escalate / hand off** | High-severity risks → `escalate_to_human` (policy override even in LLM mode); personal contact only via consent → `handoff_to_human` | c2#1: listing record says papers pending → escalate and warn the buyer not to pay a deposit; c3#5: asks the buyer for consent, never shares the number |
 | **Propose a next best action from state** | `next_best_action` with a reason, chosen only from allowed actions | c1#7: seller firm → no more questions to the seller (alternatives were already shown at c1#5); the next action is the buyer's open odo question |
 
@@ -340,12 +347,16 @@ All eight event types from the brief are produced: `USER_MESSAGE, AGENT_ACTION, 
 | | Extraction F1 | Final state facts vs gold, per field group; a wrong value counts as 1 FP + 1 FN | 100% / 100% (81% on v1–v3 before fixes) |
 | | Hallucination rate | (a) facts with no source; (b) replies making a commitment ("đã…", "sẽ kiểm tra") with no tool behind it | 0 / 0 unsourced; 0/24 and 0/13 unbacked promises (legacy agent: 3 of 3 commitments unbacked) |
 | | Policy / safety violations | Forbidden actions executed; phone numbers in replies; booking with an open high risk. **Must be 0** | 0 / 0 |
+| | Reply checks | Per gold turn: what the buyer and the seller must be told (`reply_must_include`, `seller_reply_must_include`) and must not be told | live set: 15/16 rules, 15.3/16 LLM (§6.5) |
+| | Agent quality flags | Repeated message, "đã ghi nhận" to a real question, a reply naming the wrong bike (`agent/signals.py`) | 0 on dev, v1–v3, scenarios and live |
 | **Business** | Time to first qualified match | First message → first in-budget, risk-free candidate shown | Online, from events |
 | | Drop-off after seller contact | Leads that go quiet after `create_chat_bridge` | Online, from events |
 | | Disintermediation rate | Share of leads that end in an off-platform handoff | Online, from `HANDOFF` events |
-| **Operational** | LLM fallback rate | Steps where the LLM failed and rules were used | Reported by the eval |
+| **Operational** | LLM fallback rate | Steps where the LLM failed and rules were used, plus LLM choices code replaced | Reported by the eval |
+| | Reply retries · template fallbacks | LLM replies sent back by the reply check, and turns that ended with the template | live: 4.7 · 0 per run |
+| | Prompt size per run | Characters sent to the LLM | live: 0.71M (+13% over the rules-win baseline) |
 
-**Honest reading of the numbers:** the dev gold was written alongside the agent, so its 100% shows the agent behaves as designed. The v1–v3 set was written after the build. Its first run found real failures (extraction F1 81%, risk match 67%); I fixed them test-first. **v1–v3 are therefore no longer unseen**, and a fresh set from real logs is the first next step. The sample is small (27 labelled turns, plus 14 in the two live-chat scenarios x1–x2; all 41 at 100% in rules mode).
+**Honest reading of the numbers:** the dev gold was written alongside the agent, so its 100% shows the agent behaves as designed. The v1–v3 set was written after the build. Its first run found real failures (extraction F1 81%, risk match 67%); I fixed them test-first. **v1–v3 are therefore no longer unseen**, and a fresh set from real logs is the first next step. The sample is small (27 labelled turns, plus 14 in the two live-chat scenarios x1–x2, all 41 at 100% in rules mode; plus 43 messages in the five live web chats, `--set live`, 100% next-action and 15/16 reply checks in rules mode).
 
 ### 5.3 Error Analysis
 
@@ -395,6 +406,14 @@ A live three-way chat in the web demo found a third class of bug: the agent nego
 - **Answers, not filler:** "cần trong tuần này" is read as needing the transfer now and answered for the bike under discussion; the "bạn ưu tiên hãng nào?" filler question is never asked once a bike is chosen.
 
 These fixes are vocabulary work, and the list will never be complete. That is the case for the hybrid LLM extractor (§4.3), now measured with one provider (§6.5).
+
+Five more live three-way chats in the browser (now `--set live`, `data/make_livechats.py`) showed why rules alone keep failing, even in LLM mode, where the old hybrid let a rule reading override the LLM:
+- **Short replies need context.** "oki" was not a yes; the seller's "ok 3h" was 3am today; "ok" agreed to everything open; "21 triệu" about the bike the buyer pointed at became their budget. Each means something only as an answer to the last message.
+- **Vietnamese chat has too many spellings for a list.** 20 củ / 20tr / 20t, Q1 / quận 1, sg / tp.hcm, oki / okie / đc, "có xe nào giới thiệu". Every new one was a miss until it was added.
+- **Fixes collide.** Accent folding made "Quận" match "quán" (café); an address pattern matched "3 được"; each new rule can break an older case.
+- **The eval hid it.** Rules score 100% on every set because every case was a failure already patched; new chats keep finding new phrasing.
+
+They also found failures of the agent's own steps: the LLM reply dropped the planned seller question but told the buyer "đã hỏi chủ xe rồi"; a viewing was booked with no hour, without the buyer, or at "Q1" only. The fix was the LLM-first design measured in §6.5: the LLM reads meaning and writes replies; code keeps numbers, adds the steps someone is waiting on, and checks every reply before it is sent.
 
 This is the loop in §5.4 working in miniature.
 
@@ -467,16 +486,20 @@ So the system must turn unstructured chat into **state**, decide actions from th
 | Planner | `agent/planner.py` | Rule planner; LLM planner validated against gates with policy overrides |
 | Tools | `agent/tools.py` | Mock marketplace APIs, idempotent, logged |
 | Memory | `agent/memory.py` | SQLite store, context builder, summary, promotion |
-| Responder | `agent/responder.py` | Vietnamese replies, guards (no phone numbers, no unbacked promises) |
+| Responder | `agent/responder.py` | Template replies (the MUST_SAY list), LLM responder, guards (no phone numbers, no unbacked promises) |
+| Reply check | `agent/reply_check.py` | Before an LLM reply is sent: everyone with a MUST_SAY item gets one, its numbers, times, bikes and addresses are kept, no invented amount, no false "đã hỏi người bán", no internal words, no repeat |
 | Feedback | `agent/feedback.py` | Outcomes, tuples, few-shot mining |
-| Eval | `eval/run_eval.py`, `eval/gold*/` | Replay against gold, baseline, metrics report |
+| LLM client | `agent/llm.py` | One `parse()` for every provider; `CachedLLM` records a paid run and replays it free |
+| Eval | `eval/run_eval.py`, `eval/gold*/` | Replay against gold, baseline, metrics report; `--record` / `--replay` |
 
 ### 6.3 Key design decisions and trade-offs
 
 | Decision | Chosen | Alternative | Trade-off / why |
 |---|---|---|---|
 | Who decides | **LLM proposes, code decides** (gates + reducer in code; tool arguments built from state) | Autonomous ReAct-style agent | Less flexible, but predictable, testable, cheap, and immune to invented arguments; thresholds can be learned later |
+| Reading a message | **LLM for meaning, rules for format** (numbers, fixed values), rules fill a bike pick the LLM didn't make | Rules win on any field they read (the earlier hybrid) | Short replies only make sense in context, which rules can't see; but the rules' numbers and bike picks are reliable, and the version that dropped them regressed (§6.5) |
 | Number extraction | **Rules** | LLM | Exact and unit-testable; the LLM covers meaning and slang the rules miss |
+| Writing replies | **LLM writes from a MUST_SAY list; code checks the reply; one retry; then templates** | Free LLM rewrite of a template draft | +13% prompt size and ~5 retries per 43 messages, for no dropped seller questions, no false "đã hỏi", no invented amounts and no repeats |
 | Framework | **Plain Python + Pydantic + SQLite** | LangChain / LangGraph | The design must be readable; the loop maps one-to-one onto LangGraph nodes if checkpointing or human-in-the-loop are needed later |
 | Retrieval | **Keyed** (lead, buyer, listing) | Vector RAG | Deterministic and enough at this scale; embeddings later for similar-case few-shot examples |
 | Summary | **Rebuilt from state** | Summarise the previous summary | Can't drift; costs nothing |
@@ -498,7 +521,8 @@ So the system must turn unstructured chat into **state**, decide actions from th
 | Buyer and seller message at once | Lost updates | Optimistic version check on save (production: retry) |
 | Tool error or timeout | Crash or inconsistent state | Error returned as data, logged, state unchanged, turn continues |
 | Duplicate calls on retry | Double booking | Idempotency by (conversation, tool, args hash) |
-| Repeating the same question | Annoyed users, drop-off | No repeat within 2 messages; blocking questions capped at 2 |
+| Repeating the same question | Annoyed users, drop-off | No repeat within 2 messages, for the LLM planner too; a viewing question waits until that person answers; a second ask is worded as a reminder; the reply check sends back an LLM reply that repeats a recent message |
+| LLM reply leaves out a step or a fact | The seller is never asked while the buyer hears "đã hỏi" (live chat w1) | Code adds the steps someone is waiting on; `reply_check` compares the reply with MUST_SAY; one retry, then templates |
 | Personal data in logs | Privacy and compliance risk | Phones (digits or words), Zalo/FB IDs, bank accounts and emails redacted before logging (`agent/pii.py`); never stored in state. Names and street addresses are not yet covered |
 | Ambiguous listing | Connecting the wrong bike | Resolution step; bridge blocked until the listing is identified and verified |
 | Overfitting to the eval | False confidence | Separate dev and v1–v3 sets; label changes documented; fresh unseen set required next |
@@ -560,6 +584,27 @@ Decided after run 2, before run 3: the LLM's early searches were reasonable, so 
    - **Not yet safe to shrink the window.** Next-action dipped in some pinned runs: twice the LLM extractor read "Ok em lấy giá đó" ("OK, I'll take that price") as `DROP`, and twice the planner searched after "em không gấp, đợi được". Neither appeared without pins, but 3 runs can't say whether pins cause them. Decision: **pins on, window stays at 20**; a `DROP` from the LLM should need a rule cue before it is accepted, then re-test window 6.
    - **Fixed since:** an LLM `DROP` is now accepted only when the message has a withdrawal word ("không mua", "khỏi", "mua xe khác"…); "Ok em lấy giá đó" no longer closes the lead (`tests/test_signals.py`). Window 6 not re-tested yet.
    - **Live web demo, viewing never arranged:** the buyer picked the seller's Vision, said "mai hoặc mốt thì đc", then "chiều mai 4h"; the agent only noted the time and told the buyer "chưa có kênh chat". Viewing consent came only from words like "xem xe" / "kết nối", and no step asked the seller anything. Now a day or time for a bike already picked counts as wanting to view; when the bike's seller is in the chat, the time and the place are each proposed by one side and must be agreed by the other ("ok 3h", "ok quận 1 được") before `book_appointment` is allowed; a time without an hour ("tomorrow afternoon" from the LLM) is rejected, and changing a booked time unbooks it until it is agreed again. A second live chat had booked the seller's "hẹn khách ở quận 1 được ko" with no hour and without the buyer, then told the buyer "đã chốt lịch lúc 3 giờ" without asking the seller; "đã chốt lịch" is now a promise the reply guard checks. A third chat was booked "ở Q1" while the buyer asked for the exact address: an area ("Q1", "Phú Nhuận") is no longer a bookable place; the seller is asked for a street address in it, which keeps the buyer's agreement ("12 Lê Lợi, Quận 1"). "Hỏi chủ xe thử …" is now relayed to the seller word for word, and the LLM may say it asked the seller only when that question was actually sent (`tests/test_pinned_anchors.py`).
+
+   **LLM-first redesign, measured (`--set live`, `--record` / `--replay`).** The live web chats above changed the design: the LLM reads meaning and writes replies, code keeps numbers, adds the steps someone is waiting on, and checks each reply (§4.3, `agent/reply_check.py`). Three paid runs per version on the five live chats, OpenAI gpt-6-luna; "before" is commit `3ac1092` (rules win on any field they read) with the same eval code. The final version's three runs are in `eval/recordings/` and replay for free (`--replay eval/recordings/live_gpt-6-luna_1.json`); the other recordings stayed local in `runs/phase5/`.
+
+| `live`, mean of 3 runs (range) | before | LLM-first v1 | + bike-pick fix | **+ repeat fix (final)** |
+|---|---|---|---|---|
+| next-action accuracy | 97% (95–100) | 92% | 99% (97–100) | **100%** |
+| escalation recall | 92% (75–100) | 75% | 100% | **100%** |
+| extraction F1 | 93% | 79% | 92% | 92% |
+| reply checks passed (of 16) | 14.7 (13–16) | 15 | 16 | 15.3 (15–16) |
+| agent quality flags | 0.3 | 4.7 | 5.3 | **0** |
+| invented details · unbacked promises · policy violations | 0 · 0 · 0 | 0 · 0 · 0 | 0 · 0 · 0 | 0 · 0 · 0 |
+| reply retries · template fallbacks | 0 · 0.7 | 4.7 · 0 | 6 · 0 | 4.7 · 0 |
+| LLM calls · prompt size per run | 146 · 0.63M | 151 · 0.69M | 152 · 0.72M | 152 · 0.71M (+13%) |
+
+   On the 9 original cases (`--set all`), the same paid round compared before and v1: next-action 99% → 87%, stage accuracy 100% → 86%, extraction F1 98% → 81%. The fixes below were not re-run paid on `all`; replaying v1's recordings with the fixed code (free, about half the calls fall back to rules) gave 99% next-action and 97% F1.
+
+   What each version found:
+   - **v1 regressed, and the eval caught it.** Dropping every rule reading of meaning also dropped the rules' correct bike pick when the LLM named none: "chiếc 2022 thì có giảm thêm ko", "oki" to the offered Gò Vấp bike, and "Con Lead 2021 … muốn xem xe" (no bike, so no bridge and no booking). The LLM's free text also replaced fixed values ("xe đẹp" for `good_looking`), and it read a bike's price as the budget. Fixed: the rules' bike pick fills an LLM silence, the rules' format wins when both read a field, and a budget equal to a listed price is dropped.
+   - **The reply check worked from the start:** reply checks went from 14.7 to 15–16 of 16, with no template fallbacks; the seller question the live chat dropped is now always sent.
+   - **But the replies repeated themselves** (16 flags in 3 runs, against 1 before). The LLM planner's questions skipped the cooldown, so the seller got the same discount question three turns running; one side's "ok" re-opened the other side's question although they hadn't answered. Fixed: LLM questions obey the cooldown; a viewing question waits until that person answers about the viewing, and a second ask reads "Nhắc lại giúp mình: …"; the reply check sends back an LLM reply whose word pairs are ≥85% in a recent message to the same person (word pairs, so "Người bán đồng ý giờ 15h00" is news, not a repeat). Removing the repeats exposed silences, now answered: "đã hỏi chủ xe chưa?" gets the status instead of being relayed, the buyer is told what the viewing still waits for, and "mấy h?" gets "giờ xem xe chưa có…". Flags went to 0 in all 3 runs.
+   - **Remaining:** "rồi sao" still gets no real answer (1 of 3 runs, and in rules mode); in 19 of 43 turns the LLM planner proposed only questions that were waiting for an answer, so code used the rule plan, because its prompt doesn't say which questions are on cooldown. Ship criteria on `live` (reply checks up, nothing invented, next-action at or above before, prompt cost within +20%) are met; `all` and `long` with the final code still need a paid run.
 
    Next: the same run on `anthropic:claude-opus-5-5` and a local `ollama:` model, with latency and cost per turn.
 3. **Circuit breaker** in the LLM client (stop calling after N consecutive failures).

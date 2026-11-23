@@ -235,8 +235,10 @@ class RuleExtractor:
             lc = state.listing_context
             known = {x.ask_price for x in [lc.selected, *lc.candidates, *lc.previous] if x and x.ask_price}
             if not is_offer and any(m.low in known for m in ms) \
-                    and (Intent.SELECT_LISTING in ex.intents or models or N.parse_years(t)):
-                continue  # "chiếc vision 2020, 21t mà": the price of a bike they point at, not a budget
+                    and (Intent.SELECT_LISTING in ex.intents or models or N.parse_years(t)
+                         or not N.has_any(cl, BUDGET_FIRM + BUDGET_APPROX)):
+                # "chiếc vision 2020, 21t mà" / "xe ở gò vấp 21 triệu": the price of a bike they point at, not a budget
+                continue
             if is_offer:   # "25 được không?" is a counter-offer, never a new budget
                 ex.intents.append(Intent.OFFER_PRICE)
                 self._add(ex, msg, "negotiation.buyer_offer", min(m.low for m in ms), 0.85, cl)
@@ -274,7 +276,8 @@ class RuleExtractor:
             self._add(ex, msg, "consent.buyer_bridge", True, 0.9)
         if N.has_any(t, CONDITION):
             ex.intents.append(Intent.ASK_CONDITION)
-        if re.search(r"(?i)hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?(chủ xe|chủ|người bán|bên bán)", t):
+        if re.search(r"(?i)hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?(chủ xe|chủ|người bán|bên bán)", t) \
+                and not N.ASKED_YET_RE.search(t):
             ex.intents.append(Intent.ASK_SELLER)
         if N.has_any(t, ASK_DISCOUNT) and Intent.OFFER_PRICE not in ex.intents:
             ex.intents.append(Intent.ASK_DISCOUNT)
@@ -502,6 +505,8 @@ class LLMExtractor:
         user = (
             "CONTEXT (do not extract from this, it is background):\n"
             + json.dumps(context or {}, ensure_ascii=False, default=str)
+            + (f"\n\nTHE AGENT'S LAST MESSAGE TO THE {msg.sender.value.upper()} (a short reply like \"oki\" / \"được\" "
+               f"answers this):\n{(context or {}).get('agent_last_to_sender')}" if (context or {}).get("agent_last_to_sender") else "")
             + f"\n\nNEW MESSAGE from {msg.sender.value} ({msg.msg_id}, {msg.timestamp.isoformat()}):\n{msg.text}"
         )
         out: LLMExtraction = self.llm.parse(EXTRACT_SYSTEM, user, LLMExtraction)
@@ -521,14 +526,43 @@ class LLMExtractor:
         return ex
 
 
+# Readings that need context: rules got these wrong in live chats, so when the LLM ran, only its reading counts
+# (a rule-only reading is dropped). Every other field a rule finds is kept unless the LLM reads it differently.
+# Meaning fields: when both read one, the LLM's reading wins; when only the rules read one, it is dropped, except a
+# bike pick (BIKE_PICK), which the rules may still make when the LLM names no bike (Phase 5, live run 1: the LLM
+# returned nothing for "chiếc 2022 thì có giảm thêm ko" and for "oki" to the offered bike, and the right pick was lost).
+LLM_ONLY = {"listing.select_listing", "listing.select_model", "consent.buyer_bridge", "consent.buyer_contact_share",
+            "appointment.agree", "appointment.proposed_time", "appointment.proposed_place",
+            "negotiation.seller_stance", "negotiation.buyer_stance", "constraints.urgency"}
+BIKE_PICK = {"listing.select_listing", "listing.select_model"}
+# Intents that only say what kind of message it is (a question); harmless if a keyword over-fires.
+RULE_INTENTS = {Intent.GREETING, Intent.SEARCH, Intent.ASK_DISCOUNT, Intent.ASK_SELLER, Intent.ASK_PAPERWORK,
+                Intent.ASK_CONDITION, Intent.ASK_INFO}
+
+
 class HybridExtractor:
-    """Rules own the numbers; the LLM adds meaning. Falls back to rules on any LLM failure."""
+    """The LLM decides what a message means; code checks it; rules are the fallback.
+
+    - Meaning (which bike, consent, agreement, viewing time/place, stance, urgency, intents) comes from the LLM. Rule readings of these were the source of most live-chat errors ("ok 3h" read as 3am, "21 triệu" the
+      bike's price read as a budget, "oki" not a yes) and used to override the LLM.
+    - Other fields both read (numbers, fixed values like condition "good_looking"): the rules' value wins (format);
+      a number disagreement is counted for review.
+    - Rule facts the LLM is silent about are kept, except LLM_ONLY ones; a rule bike pick is kept when the LLM
+      names no bike.
+      Question-type intents in RULE_INTENTS are kept from the rules too.
+    - Risks: union of both (recall matters for safety).
+    - Code checks on the LLM's output: wrong-side intents, DROP needs a cue (LLMExtractor); sharing the buyer's
+      contact needs the rules to agree too; normalising, impossible prices and times without an hour (reducer).
+    - Any LLM failure: the rules alone.
+    """
     name = "hybrid"
 
     def __init__(self, llm: StructuredLLM):
         self.rules = RuleExtractor()
         self.llm = LLMExtractor(llm)
         self.fallbacks = 0
+        self.number_disagreements = 0
+        self.overrides = 0            # LLM readings code refused (counted with fallbacks in the eval)
 
     def extract(self, msg: Message, state: State, context: Optional[dict] = None) -> Extraction:
         base = self.rules.extract(msg, state, context)
@@ -540,14 +574,33 @@ class HybridExtractor:
             self.fallbacks += 1
             print(f"[extractor] LLM unavailable ({e}); using rules for {msg.msg_id}")
             return base
-        have = {f.field for f in base.facts}
+        self.overrides += self.llm.drops_rejected - getattr(self, "_drops_seen", 0)
+        self._drops_seen = self.llm.drops_rejected
+        rule_facts = {f.field: f for f in base.facts}
+        lc = state.listing_context
+        known = {x.ask_price for x in [lc.selected, *lc.candidates, *lc.previous] if x and x.ask_price}
+        facts = []
         for f in llm_ex.facts:
-            if f.field in have:
-                continue                      # rules win on fields they found
-            if f.field in INT_FIELDS:
-                f.confidence = min(f.confidence, 0.8)   # number the regex did not see
-            base.facts.append(f)
-        base.intents = list(dict.fromkeys(base.intents + llm_ex.intents))
+            r = rule_facts.get(f.field)
+            if r is not None and f.field not in LLM_ONLY:
+                if f.field in INT_FIELDS and r.value != f.value:
+                    self.number_disagreements += 1
+                f = r                                       # same field: the rules' format wins
+            elif f.field in INT_FIELDS:
+                f.confidence = min(f.confidence, 0.8)       # a number the regex did not see
+            if f.field == "constraints.budget_max" and r is None and f.value in known \
+                    and not N.has_any(msg.text, BUDGET_FIRM + BUDGET_APPROX):
+                self.overrides += 1                         # "Con Lead 2021 giá 26tr": a bike's price, not a budget
+                continue
+            if f.field == "consent.buyer_contact_share" and f.value is True and not (r and r.value is True):
+                self.overrides += 1                         # sharing a phone number: both must read it
+                continue
+            facts.append(f)
+        have = {f.field for f in facts}
+        keep = lambda f: f.field not in LLM_ONLY or (f.field in BIKE_PICK and not have & BIKE_PICK)
+        facts += [f for f in base.facts if f.field not in have and keep(f)]
+        base.facts = facts
+        base.intents = list(dict.fromkeys(llm_ex.intents + [i for i in base.intents if i in RULE_INTENTS]))
         known = {r.type for r in base.risks}
         base.risks += [r for r in llm_ex.risks if r.type not in known]
         base.extractor = self.name

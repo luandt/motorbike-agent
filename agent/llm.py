@@ -23,11 +23,13 @@ JSON mode with the schema in the prompt, then validated with Pydantic.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -315,3 +317,51 @@ def make_llm(mode: str, spec: Optional[str] = None) -> Optional[StructuredLLM]:
         if mode == "llm":
             raise
         return None
+
+
+class CachedLLM(StructuredLLM):
+    """Record / replay wrapper, so evals and tests can rerun LLM mode for free and get the same result each time.
+
+    record: call the real LLM and save each answer, keyed by model + schema + prompt.
+    replay: answer from the file only; a prompt that is not in it raises LLMUnavailable (counted as a fallback),
+            so a stale recording shows up instead of silently calling the API.
+    Replay follows the first recorded run: its answers make the next prompts identical to that run's.
+    """
+
+    def __init__(self, inner: Optional[StructuredLLM], path: str | Path, mode: str = "replay"):
+        super().__init__()
+        assert mode in ("record", "replay")
+        self.inner, self.path, self.mode = inner, Path(path), mode
+        self.provider = inner.provider if inner else "replay"
+        self.model = inner.model if inner else self.path.stem
+        self.cache: dict[str, list] = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+        self.hits = self.misses = 0
+
+    def _key(self, system: str, user: str, schema: type) -> str:
+        return hashlib.sha256(f"{schema.__name__}\n{system}\n{user}".encode("utf-8")).hexdigest()[:24]
+
+    def parse(self, system: str, user: str, schema: Type[T]) -> T:
+        key = self._key(system, user, schema)
+        if self.mode == "replay":
+            if key not in self.cache:
+                self.misses += 1
+                raise LLMUnavailable(f"not in the recording {self.path.name}")
+            self.hits += 1
+            got = self.cache[key][0]
+            if isinstance(got, dict) and "__unavailable__" in got:
+                raise LLMUnavailable(got["__unavailable__"])     # the recorded run fell back here too
+            return schema.model_validate(got)
+        try:
+            out = self.inner.parse(system, user, schema)
+        except LLMUnavailable as e:
+            self.cache.setdefault(key, []).append({"__unavailable__": str(e)})
+            raise
+        finally:
+            self.calls, self.prompt_chars = getattr(self.inner, "calls", 0), getattr(self.inner, "prompt_chars", 0)
+        self.cache.setdefault(key, []).append(out.model_dump(mode="json"))
+        return out
+
+    def save(self) -> None:
+        if self.mode == "record":
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self.cache, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")

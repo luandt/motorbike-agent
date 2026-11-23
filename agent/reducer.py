@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
-from .normalize import exact_place, find_location
+from .normalize import ASKED_YET_RE, exact_place, find_location
 from .pii import redact
 from .models import (Extraction, Fact, Intent, LeadStage, ListingRef, Message, OpenQuestion,
                      Risk, RiskSignal, RiskType, State, Tracked)
@@ -197,9 +197,11 @@ def _set_appointment(state: State, name: str, fact: Fact, diffs: list) -> None:
     without the seller."""
     ap, who = state.appointment, fact.speaker
     if name == "agree":
-        for q in ("appointment_confirm", "appointment_ok"):   # answered: what is still missing can be asked now
-            state.asked_fields.pop(q, None)
-            state.asked_counts.pop(q, None)
+        # the side that agreed answered its question: what is still missing from it can be asked now. The other
+        # side's question stays asked (Phase 5: the seller's "ok 3h" re-sent the buyer the Q1 question unanswered)
+        q = "appointment_confirm" if who == "seller" else "appointment_ok"
+        state.asked_fields.pop(q, None)
+        state.asked_counts.pop(q, None)
         for slot in ("time", "place"):
             if getattr(ap, f"proposed_{slot}") and getattr(ap, f"{slot}_by") not in (None, who) \
                     and not getattr(ap, f"{slot}_agreed"):
@@ -290,7 +292,13 @@ def apply_extraction(state: State, ex: Extraction, msg: Message) -> tuple[State,
     # select_model first, so that later listing facts in the same message attach to the new bike
     for fact in sorted(ex.facts, key=lambda f: f.field != "listing.select_model"):
         apply_fact(state, fact, msg.index, diffs)
-    if msg.sender.value == "buyer" and Intent.ASK_SELLER in ex.intents:
+    # a viewing question waits on one person: once they answer about the viewing (a time, a place, a yes), the next
+    # one to them (usually asking for something new) may go out; until then it is not sent again (Phase 5 live
+    # runs: the same question every turn). "mấy h?" is not an answer: the normal cooldown applies.
+    mine = {"seller": "appointment_confirm", "buyer": "appointment_ok"}.get(msg.sender.value)
+    if mine and any(f.field.startswith("appointment.") for f in ex.facts):
+        state.asked_fields.pop(mine, None)
+    if msg.sender.value == "buyer" and Intent.ASK_SELLER in ex.intents and not ASKED_YET_RE.search(msg.text):
         state.relay = {"text": relay_text(redact(msg.text)[0]), "msg": msg.msg_id}
     sel = state.listing_context.selected
     if msg.sender.value == "buyer" and sel and sel.listing_id and not state.consent.buyer_bridge \
@@ -332,7 +340,9 @@ def apply_tool_result(state: State, tool: str, args: dict, result: Any, msg: Mes
         sel_id = lc.selected.listing_id if lc.selected else None
         before = [c.listing_id for c in lc.candidates]
         lc.candidates = [_listing_from_tool(r) for r in result if r["listing_id"] != sel_id]
-        lc.candidates_unchanged = bool(before) and before == [c.listing_id for c in lc.candidates]
+        now = [c.listing_id for c in lc.candidates]
+        lc.candidates_unchanged = bool(before) and before == now
+        lc.candidates_narrowed = bool(now) and not lc.candidates_unchanged and set(now) < set(before)
         if lc.candidates:
             lc.candidates_at = state.msg_count
             state.anchors["candidates_shown"] = msg.msg_id

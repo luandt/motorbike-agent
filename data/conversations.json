@@ -43,5 +43,25 @@
   "l3": {
     "buyer_id": "b_303",
     "seller_id": "s_005"
+  },
+  "w1": {
+    "buyer_id": "b_w1",
+    "seller_id": "s_008"
+  },
+  "w2": {
+    "buyer_id": "b_w2",
+    "seller_id": "s_008"
+  },
+  "w3": {
+    "buyer_id": "b_w3",
+    "seller_id": "s_009"
+  },
+  "w4": {
+    "buyer_id": "b_w4",
+    "seller_id": "s_009"
+  },
+  "w5": {
+    "buyer_id": "b_w5",
+    "seller_id": "s_008"
   }
 }

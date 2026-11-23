@@ -123,8 +123,12 @@ class TemplateResponder:
             # "ok 3h": the other side agreed to a time / place; tell the side that proposed it
             if n["type"] == "appointment_agreed":
                 what = f"giờ xem xe {_fmt_time(n['value'])}" if n["slot"] == "time" else f"địa điểm {n['value']}"
-                (buyer if n["by"] == "seller" else seller).append(
-                    f"{'Người bán' if n['by'] == 'seller' else 'Người mua'} đồng ý {what} ạ.")
+                line = f"{'Người bán' if n['by'] == 'seller' else 'Người mua'} đồng ý {what} ạ."
+                if n["by"] == "buyer" and "appointment_confirm" not in fields:
+                    from .reducer import waiting_on
+                    if "address" in waiting_on(state, "seller"):     # the one thing left to book: say it with the news
+                        line = line[:-3] + ", anh/chị gửi giúp mình địa chỉ cụ thể (số nhà, tên đường) để chốt lịch nhé."
+                (buyer if n["by"] == "seller" else seller).append(line)
         for n in news or []:
             # answer "cần trong tuần này" about the bike being discussed, not with the next question on the list
             if n["type"] == "urgency" and sel and sel.listing_id and n["value"] == "transfer_now":
@@ -175,6 +179,10 @@ class TemplateResponder:
                 elif state.listing_context.candidates_unchanged:
                     # don't re-send the same list after a narrower search
                     buyer.append(f"Với tiêu chí mới, {len(cands)} xe ở trên vẫn là những xe phù hợp nhất ạ.")
+                elif state.listing_context.candidates_narrowed:
+                    names = ", ".join(f"{x.model} {x.year} ({vnd(x.ask_price)}, {x.district or x.location})" for x in cands)
+                    buyer.append(f"Lọc theo ý bạn thì trong các xe vừa gửi còn {len(cands)} xe: {names}."
+                                 + (" Bạn thích xe nào ạ?" if len(cands) > 1 else ""))
                 else:
                     gap = state.negotiation.gap_pct or 0
                     room = state.participants.get("seller_id")
@@ -207,7 +215,11 @@ class TemplateResponder:
                     buyer.append("Mình đã hỏi người bán giúp bạn, có trả lời mình báo bạn ngay ạ.")
                 if field in ("appointment_confirm", "appointment_ok"):
                     text, note = _appointment_ask(state, "seller" if field == "appointment_confirm" else "buyer")
-                    (buyer if field == "appointment_confirm" else seller).append(note)
+                    other = "buyer" if field == "appointment_confirm" else "seller"
+                    if not any(S.repeats(note, t) for t in sent.get(other, [])[-2:]):
+                        (buyer if other == "buyer" else seller).append(note)
+                    if state.asked_counts.get(field, 0) > 1:
+                        text = "Nhắc lại giúp mình: " + text[0].lower() + text[1:]
                 if field == "appointment_time" and seller_here:
                     text = "Bạn muốn xem xe vào ngày giờ nào ạ?"     # the seller gives the place
                 if field in ("relay_offer", "accept_floor"):
@@ -254,6 +266,23 @@ class TemplateResponder:
                 buyer.insert(0, line)
             elif not buyer:
                 buyer.append(f"Dạ đúng rồi, vẫn là xe {_bike(sel)} ạ.")
+        # someone wrote while the viewing waits on the other side, and nothing else is due to them: say what we wait for
+        # (instead of asking the other side the same question again, which the cooldown now stops)
+        frm = (message or {}).get("from")
+        if frm == "buyer" and not buyer and N.ASKED_YET_RE.search((message or {}).get("text") or ""):
+            from .reply_check import SELLER_FIELDS
+            last = max((state.asked_fields[f] for f in SELLER_FIELDS if f in state.asked_fields), default=None)
+            if last is not None and state.msg_count - last <= 6:
+                buyer.append("Dạ, người bán chưa trả lời ạ. Mình đã hỏi lúc nãy, có tin là mình báo bạn ngay.")
+        if frm == "buyer" and not buyer and state.appointment.proposed_time is None and state.consent.buyer_bridge \
+                and re.search(r"(?i)mấy\s*(h|giờ)\b|giờ nào", (message or {}).get("text") or ""):
+            buyer.append("Dạ giờ xem xe chưa có ạ. Bạn muốn xem lúc mấy giờ để mình hỏi người bán?")    # "mấy h?"
+        if frm in ("buyer", "seller") and not (buyer if frm == "buyer" else seller):
+            line = _waiting_line(state, "seller" if frm == "buyer" else "buyer")
+            if line:
+                (buyer if frm == "buyer" else seller).append(line)
+        # what each person must be told this turn; the LLM responder writes from these and is checked against them
+        self.last_items = [{"to": "buyer", "text": x} for x in buyer] + [{"to": "seller", "text": x} for x in seller]
         if not buyer and not seller:
             buyer.append("Dạ mình đã ghi nhận ạ.")
         out = []
@@ -313,6 +342,24 @@ def _appointment_ask(state: State, side: str) -> tuple[str, str]:
     return q, "Mình đã hỏi người mua, chờ người mua xác nhận ạ."
 
 
+def _waiting_line(state: State, other: str) -> Optional[str]:
+    """What the viewing still waits on from `other`, when they were asked and have not written since."""
+    from .reducer import waiting_on
+    q = "appointment_confirm" if other == "seller" else "appointment_ok"
+    w = waiting_on(state, other)
+    if q not in state.asked_fields or not w:
+        return None
+    if other == "buyer":
+        return "Dạ, mình đang chờ người mua xác nhận lịch xem xe ạ."
+    ap = state.appointment
+    when = f" lúc {_fmt_time(ap.proposed_time)}" if ap.proposed_time else ""
+    parts = ([f"xác nhận giờ xem xe{when}"] if "time" in w else []) \
+        + (["gửi địa chỉ cụ thể (số nhà, tên đường)"] if "address" in w else [])
+    if "place" in w and "address" not in w:
+        parts.append("báo địa điểm xem xe" if ap.proposed_place is None else f"đồng ý địa điểm {ap.proposed_place}")
+    return "Dạ, mình đang chờ người bán " + " và ".join(parts) + " ạ, có trả lời mình báo bạn ngay."
+
+
 def _fmt_time(iso: str) -> str:
     try:
         from datetime import datetime
@@ -347,7 +394,11 @@ MESSAGE_NOW is the message you are replying to. If it asks something, answer tha
 TOOL_RESULTS; if none of them has the answer, say plainly that you don't have that detail yet (never guess).
 KEY_MESSAGES are the original words behind facts that are still live (a seller's paperwork note, a price, the bikes
 shown): when you state such a fact, keep to what they say and never add details (dates, amounts) they do not contain.
-TEMPLATE_DRAFT is correct about WHICH bike each sentence is about and who is asked what: keep that, only make it read naturally.
+MUST_SAY lists what code decided each person hears this turn ("to": buyer / seller): every question, news line, warning
+and booking. Say every item to that person, in your own natural words, in one message per person; keep each item's
+bike, numbers, times and addresses exactly, and who is asked what. Do not add questions, requests or amounts that are
+not in MUST_SAY, FACTS or TOOL_RESULTS. If MUST_SAY is empty, just answer MESSAGE_NOW briefly.
+If PROBLEMS_WITH_YOUR_LAST_DRAFT is given, rewrite YOUR_LAST_DRAFT so that none of those problems remain.
 Never say a bike from another seller can be negotiated with the seller in this chat.
 Say you asked the seller something only when EXECUTED_ACTIONS has an ask_clarification to the seller this turn or
 ALREADY_SENT shows that question to the seller; otherwise say you have not asked yet.
@@ -359,35 +410,54 @@ something already said, say it in a few words ("vẫn là xe đó ạ") and move
 
 
 class LLMResponder:
+    """Writes the replies from MUST_SAY (what code decided each person hears this turn), then code checks them
+    (agent/reply_check.py). One retry with the problems listed; after that the template replies are sent."""
     name = "llm"
 
     def __init__(self, llm: StructuredLLM):
         self.llm = llm
         self.templates = TemplateResponder()
-        self.guard_failures = 0
+        self.guard_failures = 0      # turns that fell back to the templates
+        self.retries = 0             # turns where the first draft failed a check
+        self.last_problems: list[str] = []
 
     def write(self, state: State, executed: list[tuple[Action, object]], new_risks: set[str],
               intents: Optional[list[str]] = None, news: Optional[list[dict]] = None,
               sent: Optional[dict] = None, pinned: Optional[list[dict]] = None,
               message: Optional[dict] = None) -> list[Reply]:
+        from . import reply_check as RC
         draft = self.templates.write(state, executed, new_risks, intents, news, sent)
-        user = json.dumps({
+        items = self.templates.last_items
+        names = {a.name for a, _ in executed}
+        results = [r for _, r in executed]
+        payload = {
             "MESSAGE_NOW": message or {},
             "FACTS": state.summary,
             "KEY_MESSAGES": pinned or [],
             "NEWS_THIS_TURN": news or [],
             "ALREADY_SENT": {k: v[-3:] for k, v in (sent or {}).items()},
             "EXECUTED_ACTIONS": [a.model_dump() for a, _ in executed],
-            "TOOL_RESULTS": [r for _, r in executed],
-            "TEMPLATE_DRAFT": [r.model_dump() for r in draft],
-        }, ensure_ascii=False, default=str)
-        try:
-            out: Replies = self.llm.parse(RESPOND_SYSTEM, user, Replies)
-        except LLMUnavailable:
-            return draft
-        names = {a.name for a, _ in executed}
-        if guard(out.replies, names) or \
-                S.wrong_bike([r.text for r in out.replies if r.to == "buyer"], state, S.allowed_bikes(state, names, news)):
-            self.guard_failures += 1           # the template names the right bike by construction
-            return draft
-        return out.replies
+            "TOOL_RESULTS": results,
+            "MUST_SAY": items,
+        }
+        problems: list[str] = []
+        for attempt in range(2):
+            if problems:
+                payload["PROBLEMS_WITH_YOUR_LAST_DRAFT"] = problems
+            try:
+                out: Replies = self.llm.parse(RESPOND_SYSTEM, json.dumps(payload, ensure_ascii=False, default=str), Replies)
+            except LLMUnavailable:
+                return draft
+            problems = guard(out.replies, names) + \
+                [f"names a bike that is not under discussion: {b}" for b in
+                 S.wrong_bike([r.text for r in out.replies if r.to == "buyer"], state, S.allowed_bikes(state, names, news))] + \
+                RC.check(out.replies, items, state, [a for a, _ in executed], results, (message or {}).get("text"), sent)
+            if not problems:
+                self.last_problems = []
+                return out.replies
+            if attempt == 0:
+                self.retries += 1
+                payload["YOUR_LAST_DRAFT"] = [r.model_dump() for r in out.replies]
+        self.guard_failures += 1               # the template says the right thing by construction
+        self.last_problems = problems
+        return draft

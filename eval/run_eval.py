@@ -34,7 +34,8 @@ from agent.responder import PHONE_RE, Reply, guard  # noqa: E402
 
 GOLD_SETS = {"dev": ROOT / "eval/gold", "heldout": ROOT / "eval/gold_heldout",
              "scenarios": ROOT / "eval/gold_scenarios",   # failures found in live chats, kept as regression cases
-             "long": ROOT / "eval/gold_long"}             # 40+ message chats: early details asked again late
+             "long": ROOT / "eval/gold_long",             # 40+ message chats: early details asked again late
+             "live": ROOT / "eval/gold_live"}             # live web-demo chats (two tabs) where the agent went wrong
 ALL_SETS = ("dev", "heldout", "scenarios")                 # "all" keeps its meaning (the 9 original cases)
 
 
@@ -101,9 +102,10 @@ def score_turn(gold: dict, names: list[str], asked: list[str], listing: str | No
     return not why, why
 
 
-def run_case(gold: dict, mode: str, llm: str | None = None) -> dict:
+def run_case(gold: dict, mode: str, llm=None) -> dict:
     store = Store(":memory:")
     agent = Agent(store, mode=mode, llm=llm)
+    calls0, chars0 = getattr(agent.llm, "calls", 0), getattr(agent.llm, "prompt_chars", 0)   # llm may be shared
     msgs = load_messages([ROOT / p for p in gold["sources"]], gold["conversation_id"])
     by_msg = {t["after_msg"]: t for t in gold["turns"]}
     turns, legacy_turns, replies_all, flags = [], [], [], []
@@ -135,8 +137,14 @@ def run_case(gold: dict, mode: str, llm: str | None = None) -> dict:
         sel = res.state.listing_context.selected
         ok, why = score_turn(g, names, asked, sel.listing_id if sel else None)
         escalated = any(r.status == "escalated" for r in res.state.active_risks())
-        reply_miss = reply_check(g, [r.text for r in res.replies if r.to in ("buyer", "both")]) \
-            if ("reply_must_include" in g or "reply_must_not_include" in g) else None
+        checks = {"reply_must_include", "reply_must_not_include", "seller_reply_must_include", "seller_reply_must_not_include"}
+        reply_miss = None
+        if checks & set(g):
+            reply_miss = reply_check(g, [r.text for r in res.replies if r.to in ("buyer", "both")])
+            reply_miss += [f"seller: {x}" for x in reply_check(
+                {"reply_must_include": g.get("seller_reply_must_include", []),
+                 "reply_must_not_include": g.get("seller_reply_must_not_include", [])},
+                [r.text for r in res.replies if r.to in ("seller", "both")])]
         phone_leak = any(PHONE_RE.search(r.text) or pii.has_contact(r.text) for r in res.replies)
         ex = res.extraction
         turns.append({"msg": m.msg_id, "actions": names, "asked": asked, "correct": ok, "why": why,
@@ -174,7 +182,10 @@ def run_case(gold: dict, mode: str, llm: str | None = None) -> dict:
         "unsourced_facts": unsourced, "replies": sum(len(r) for r, _ in replies_all), "unbacked_promises": unbacked,
         "legacy_unbacked_promises": legacy_promises, "llm_fallbacks": _fallbacks(agent),
         "signals": flags, "pins": pins, "turns_with_pins": turns_pinned,
-        "llm_calls": getattr(agent.llm, "calls", 0), "prompt_chars": getattr(agent.llm, "prompt_chars", 0),
+        "llm_calls": getattr(agent.llm, "calls", 0) - calls0, "prompt_chars": getattr(agent.llm, "prompt_chars", 0) - chars0,
+        "reply_retries": getattr(agent.responder, "retries", 0),
+        "reply_fallbacks": getattr(agent.responder, "guard_failures", 0),
+        "number_disagreements": getattr(agent.extractor, "number_disagreements", 0),
     }
 
 
@@ -202,13 +213,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="rules", choices=["rules", "auto", "llm"])
     ap.add_argument("--llm", default=None, help="provider:model, e.g. openai:<model>, gemini:<model> (see agent/llm.py)")
-    ap.add_argument("--set", default="dev", choices=["dev", "heldout", "scenarios", "long", "all"],
+    ap.add_argument("--set", default="dev", choices=["dev", "heldout", "scenarios", "long", "live", "all"],
                     help="dev = cases written while building; heldout = paraphrased cases written afterwards; "
                          "scenarios = failures found in live chats; long = 40+ message chats (not in all)")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--recent-k", type=int, default=None, help=f"recent-message window (default {M.RECENT_K})")
     ap.add_argument("--no-pins", action="store_true", help="turn pinned anchors off (memory.MAX_PINS = 0)")
+    ap.add_argument("--record", metavar="FILE", help="LLM mode: save every LLM answer to FILE (costs as a normal run)")
+    ap.add_argument("--replay", metavar="FILE", help="LLM mode from a recording: free, same result every time")
     args = ap.parse_args()
+    llm_obj = args.llm
+    if args.replay:
+        args.mode, llm_obj = "llm", L.CachedLLM(None, args.replay, "replay")
+    elif args.record:
+        args.mode, llm_obj = "llm", L.CachedLLM(L.build_llm(args.llm), args.record, "record")
     if args.recent_k:
         M.RECENT_K = args.recent_k
     if args.no_pins:
@@ -217,8 +235,12 @@ def main() -> None:
 
     dirs = [GOLD_SETS[s] for s in ALL_SETS] if args.set == "all" else [GOLD_SETS[args.set]]
     files = [p for d in dirs for p in sorted(d.glob("*.json"))]
-    results = [run_case(json.loads(p.read_text(encoding="utf-8")), args.mode, args.llm) for p in files]
-    llm_name = "-" if args.mode == "rules" else (L.make_llm(args.mode, args.llm) or SimpleNamespace(name="- (no credentials, rules)")).name
+    results = [run_case(json.loads(p.read_text(encoding="utf-8")), args.mode, llm_obj) for p in files]
+    if isinstance(llm_obj, L.CachedLLM):
+        llm_obj.save()
+        llm_name = f"{llm_obj.name} ({llm_obj.mode} {llm_obj.path.name}; {llm_obj.hits} hits, {llm_obj.misses} misses)"
+    else:
+        llm_name = "-" if args.mode == "rules" else (L.make_llm(args.mode, args.llm) or SimpleNamespace(name="- (no credentials, rules)")).name
     print(f"gold set: {args.set} ({len(files)} cases), mode: {args.mode}, llm: {llm_name}, "
           f"window: {M.RECENT_K} messages, pins: {'off' if args.no_pins else f'≤{M.MAX_PINS}'}")
     all_turns = [t for r in results for t in r["turns"]]
@@ -236,7 +258,8 @@ def main() -> None:
     na_legacy = sum(t["correct"] for t in legacy) / len(legacy)
     ep, er = escalation_pr(all_turns)
     lp, lr = escalation_pr(legacy)
-    stage_acc = sum(t["stage"] == t["expected_stage"] for t in all_turns) / len(all_turns)
+    staged = [t for t in all_turns if t["expected_stage"]]          # the live set labels outcomes, not stages
+    stage_acc = sum(t["stage"] == t["expected_stage"] for t in staged) / len(staged) if staged else None
     risk_match = sum(r["open_risks"] == r["expected_open_risks"] for r in results) / len(results)
     violations = sum(len(t["forbidden_hit"]) + t["phone_leak"] for t in all_turns)
     replies = sum(r["replies"] for r in results)
@@ -271,7 +294,7 @@ def main() -> None:
     print(f"{'next-action accuracy':<40}{na:>13.0%}{na_legacy:>13.0%}")
     print(f"{'escalation precision':<40}{ep:>13.0%}{'n/a':>13}")
     print(f"{'escalation recall':<40}{er:>13.0%}{lr:>13.0%}")
-    print(f"{'stage accuracy (per turn)':<40}{stage_acc:>13.0%}{'n/a':>13}")
+    print(f"{'stage accuracy (per turn)':<40}{(f'{stage_acc:.0%}' if stage_acc is not None else 'n/a'):>13}{'n/a':>13}")
     print(f"{'open-risk set exact match (per case)':<40}{risk_match:>13.0%}{'n/a':>13}")
     for g in ("constraints", "listing", "negotiation", "consent", "appointment", "ALL"):
         if g in per_field:
@@ -289,6 +312,10 @@ def main() -> None:
     print(f"{'buyer corrections / repeats in script':<40}{len(sig) - len(agent_sig):>13}{'n/a':>13}"
           "   (scripted buyer text, so not a score)")
     print(f"{'LLM fallbacks / code overrides':<40}{sum(r['llm_fallbacks'] for r in results):>13}{'':>13}")
+    if args.mode != "rules":
+        print(f"{'reply retries · template fallbacks':<40}{sum(r['reply_retries'] for r in results):>6} · "
+              f"{sum(r['reply_fallbacks'] for r in results)}")
+        print(f"{'number disagreements (regex vs LLM)':<40}{sum(r['number_disagreements'] for r in results):>13}")
     checked = [t for t in all_turns if t.get("reply_check") is not None]
     if checked:
         print(f"{'reply fact checks (stated, not invented)':<40}"
@@ -300,6 +327,7 @@ def main() -> None:
         print(f"{'LLM calls · avg prompt chars per call':<40}{calls:>13}{sum(r['prompt_chars'] for r in results) // calls:>13,}")
     print("=" * 66)
 
+    tag += "_replay" if args.replay else "_llm" if args.mode != "rules" else ""
     out = ROOT / f"runs/eval_report_{args.set}{tag}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"mode": args.mode, "llm": llm_name, "set": args.set, "next_action_accuracy": na, "legacy_next_action_accuracy": na_legacy,

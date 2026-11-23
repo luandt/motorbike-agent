@@ -1,0 +1,103 @@
+{
+  "case_id": "w5",
+  "conversation_id": "w5",
+  "sources": [
+    "data/livechats.jsonl"
+  ],
+  "objection": "'oki' to the only bike offered (Gò Vấp) must pick it, not the seller's own bike; 'rồi sao' must get the next step",
+  "expected_final_state": {
+    "constraints.budget_max": 20000000,
+    "constraints.budget_flexibility": "approx",
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 24000,
+    "listing.ask_price": 21000000,
+    "listing.paperwork_status": "pending_original_docs",
+    "constraints.location": "HCM"
+  },
+  "expected_final_stage": "MATCHING",
+  "expected_open_risks": [
+    "PAPERWORK_PENDING"
+  ],
+  "turns": [
+    {
+      "after_msg": "w5#1",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w5#2",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w5#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": true,
+      "expected_listing": "L002",
+      "reply_must_not_include": [
+        "2022",
+        "24.5",
+        "24,5"
+      ]
+    },
+    {
+      "after_msg": "w5#4",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": true,
+      "expected_listing": "L002"
+    },
+    {
+      "after_msg": "w5#5",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": true,
+      "expected_listing": "L002",
+      "reply_must_not_include": [
+        "đã ghi nhận",
+        "chưa có thêm thông tin"
+      ]
+    }
+  ]
+}

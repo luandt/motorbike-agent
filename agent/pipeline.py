@@ -87,6 +87,8 @@ class Agent:
             return TurnResult(message=msg, state=state, legacy=True)
 
         context = build_context(state, self.store)
+        to_sender = [m for m in context["recent_messages"] if m["from"] == "agent" and m.get("to") == msg.sender.value]
+        context["agent_last_to_sender"] = to_sender[-1]["text"] if to_sender else None
         ex = self.extractor.extract(msg, state, context)
         old_stage = state.lead_stage
         risks_before = {r.type.value: list(r.evidence) for r in state.risks}

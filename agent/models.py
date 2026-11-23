@@ -163,6 +163,7 @@ class ListingContext(BaseModel):
     empty_search_hints: list[dict] = Field(default_factory=list)
     candidates_at: Optional[int] = None    # msg_count when the candidates were last shown
     candidates_unchanged: bool = False     # the latest search returned the bikes already shown
+    candidates_narrowed: bool = False      # ...or only some of them ("honda" after "có xe nào giới thiệu")
 
 
 class Negotiation(BaseModel):

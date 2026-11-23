@@ -279,6 +279,7 @@ TIME_RE = re.compile(r"(\d{1,2})\s*(?:h|giờ|gio)\s*(\d{2})?", re.I)
 PLACE_RE = re.compile(r"(?<!\w)(?:ở|tại|tai)\s+((?:quận|quan|q\.?)\s*\d+|[\wÀ-ỹ]+(?:\s+[\wÀ-ỹ]+){0,2})", re.I)
 
 
+ASKED_YET_RE = re.compile(r"(?i)(đã|có)\s+hỏi\b.*\bchưa\b")    # "đã hỏi thử chủ xe đó chưa?": a progress question
 ADDRESS_RE = re.compile(r"(?<![\w/])(\d{1,4}[A-Za-z]?(?:/\d+[A-Za-z]?)*)\s+((?:đường\s+)?\w+(?:\s+\w+){0,3})")
 
 

@@ -279,7 +279,9 @@ def test_an_area_is_not_booked_until_the_seller_gives_a_street_address():
     ts = _room_chat(ADDRESS, seller="s_009")
     assert ts[8].state.appointment.proposed_place == "Quận 1"
     assert ts[9].state.appointment.place_agreed and ts[9].state.appointment.status != "booked"
-    assert "địa chỉ cụ thể" in _to(ts[9], "seller")
+    assert "địa chỉ cụ thể" in _to(ts[8], "seller")                 # asked once, when the seller named Q1
+    assert _to(ts[9], "seller").startswith("Người mua đồng ý địa điểm Quận 1")   # news, not the same question again
+    assert "chờ người bán gửi địa chỉ cụ thể" in _to(ts[9], "buyer")
     ap = ts[-1].state.appointment
     assert ap.status == "booked" and ap.proposed_place == "12 Lê Lợi, Quận 1" and ap.place_agreed
     assert "12 Lê Lợi, Quận 1" in _to(ts[-1], "buyer")

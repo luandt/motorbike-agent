@@ -179,6 +179,9 @@ Principles:
 - Prefer actions that move the lead toward a booked viewing."""
 
 
+REQUIRED_QUESTIONS = ("appointment_confirm", "appointment_ok", "relay_question")
+
+
 class LLMPlanner:
     name = "llm"
 
@@ -214,8 +217,8 @@ class LLMPlanner:
         for p in out.actions[:MAX_ACTIONS]:
             if p.name not in allowed:
                 continue                                   # LLM proposed something code forbids
-            if p.name == "ask_clarification" and p.question_field not in q_fields:
-                continue
+            if p.name == "ask_clarification" and (p.question_field not in q_fields or not askable(state, p.question_field)):
+                continue                                   # unknown, or asked recently and not answered (repeats)
             a = build_action(p.name, state, p.question_field, p.reason)
             if p.name != "ask_clarification" and already_ran(state, a):
                 continue
@@ -238,4 +241,19 @@ class LLMPlanner:
         # policy override: escalation is not optional
         if "escalate_to_human" in allowed and all(a.name != "escalate_to_human" for a in acts):
             acts.insert(0, build_action("escalate_to_human", state, reason="policy override: open high risk"))
-        return acts[:MAX_ACTIONS + 1]
+        acts = acts[:MAX_ACTIONS + 1]
+        # steps someone is waiting on are not the LLM's choice either: booking once both sides agreed, asking the
+        # side that must agree to the viewing, and passing on "hỏi chủ xe ...". In the live chats these were the
+        # steps that went missing while the reply said they had happened.
+        names = {a.name for a in acts}
+        fields = {a.args.get("field") for a in acts if a.name == "ask_clarification"}
+        if "book_appointment" in allowed and "book_appointment" not in names:
+            self.overrides += 1
+            acts.append(build_action("book_appointment", state, reason="code: time and place agreed by both sides"))
+        for f in REQUIRED_QUESTIONS:
+            if f not in fields and f in q_fields and askable(state, f) and "ask_clarification" in allowed:
+                if f == "relay_question" and any(a.name == "ask_clarification" and a.target == "seller" for a in acts):
+                    continue                    # a seller question this turn already covers it
+                self.overrides += 1
+                acts.append(build_action("ask_clarification", state, f, "code: the other side is waiting on this"))
+        return acts
