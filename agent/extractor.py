@@ -42,7 +42,8 @@ OBJECTION = ["cao quá", "đắt", "mắc", "cao", "chát"]
 BUYER_OFFER = ["bớt", "được không", "trả", "lấy giá", "để lại", "fix"]
 DEPOSIT = ["cọc", "đặt cọc", "giữ xe"]
 FLOOR = ["bớt còn", "giảm còn", "thấp nhất", "để lại", "giá cuối"]
-CAN_WAIT = ["không gấp", "ko gấp", "đợi được", "chờ được", "từ từ", "đợi vài tuần", "chờ vài tuần"]
+CAN_WAIT = ["không gấp", "ko gấp", "đợi được", "chờ được", "từ từ", "đợi vài tuần", "chờ vài tuần",
+            "không cần ngay", "ko cần ngay", "chưa cần ngay", "không cần gấp", "ko cần gấp", "có thể đợi", "có thể chờ"]
 # the buyer needs the bike (and its papers) soon: answers "sang tên ngay hay chờ vài tuần?"
 NEED_SOON = ["gấp", "cần ngay", "lấy ngay", "liền", "trong tuần", "tuần này", "hôm nay", "ngày mai", "sang tên ngay"]
 BUDGET_FIRM = ["tối đa", "chỉ mua", "chỉ có", "max", "không quá", "nhiều nhất"]
@@ -245,7 +246,13 @@ class RuleExtractor:
                 continue
             firm, approx = N.has_any(cl, BUDGET_FIRM), N.has_any(cl, BUDGET_APPROX)
             value = max(m.high for m in ms)
-            self._add(ex, msg, "constraints.budget_max", value, 0.95 if (firm or approx) else 0.55, cl)
+            # a bare "20t" right after we asked for the budget is the answer, not a guess (live chat: it was pruned
+            # as unconfirmed twice and the buyer asked again: "đã nói ở trên rồi, 20t")
+            asked = state.asked_fields.get("budget")
+            rest = re.sub(r"\S*\d\S*", " ", cl).split()          # the words around the amount
+            answers = (asked is not None and state.msg_count - asked <= 1) or len(rest) <= 1 \
+                or N.has_any(cl, ["đã nói", "nói rồi", "như trên"])    # "20t" on its own, "đã nói ở trên rồi, 20t"
+            self._add(ex, msg, "constraints.budget_max", value, 0.95 if (firm or approx) else 0.9 if answers else 0.55, cl)
             if firm or approx:
                 self._add(ex, msg, "constraints.budget_flexibility", "firm" if firm else "approx", 0.9, cl)
             if firm:
@@ -276,8 +283,9 @@ class RuleExtractor:
             self._add(ex, msg, "consent.buyer_bridge", True, 0.9)
         if N.has_any(t, CONDITION):
             ex.intents.append(Intent.ASK_CONDITION)
-        if re.search(r"(?i)hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?(chủ xe|chủ|người bán|bên bán)", t) \
-                and not N.ASKED_YET_RE.search(t):
+        if (re.search(r"(?i)hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?(chủ xe|chủ|người bán|bên bán)", t)
+                or re.search(r"(?i)\bý\s+(là|mình là)\b.*\bhỏi\b", t)) \
+                and not N.ASKED_YET_RE.search(t):          # "ý là đã hỏi mai coi xe trước được ko?" means "ask that"
             ex.intents.append(Intent.ASK_SELLER)
         if N.has_any(t, ASK_DISCOUNT) and Intent.OFFER_PRICE not in ex.intents:
             ex.intents.append(Intent.ASK_DISCOUNT)
@@ -579,6 +587,8 @@ class HybridExtractor:
         rule_facts = {f.field: f for f in base.facts}
         lc = state.listing_context
         known = {x.ask_price for x in [lc.selected, *lc.candidates, *lc.previous] if x and x.ask_price}
+        budget = rule_facts.get("constraints.budget_max")
+        offer_dropped = False
         facts = []
         for f in llm_ex.facts:
             r = rule_facts.get(f.field)
@@ -592,6 +602,10 @@ class HybridExtractor:
                     and not N.has_any(msg.text, BUDGET_FIRM + BUDGET_APPROX):
                 self.overrides += 1                         # "Con Lead 2021 giá 26tr": a bike's price, not a budget
                 continue
+            if f.field == "negotiation.buyer_offer" and r is None and budget is not None and f.value == budget.value:
+                self.overrides += 1                         # "20t" after "ngân sách bao nhiêu?": a budget, not an offer
+                offer_dropped = True
+                continue
             if f.field == "consent.buyer_contact_share" and f.value is True and not (r and r.value is True):
                 self.overrides += 1                         # sharing a phone number: both must read it
                 continue
@@ -600,7 +614,8 @@ class HybridExtractor:
         keep = lambda f: f.field not in LLM_ONLY or (f.field in BIKE_PICK and not have & BIKE_PICK)
         facts += [f for f in base.facts if f.field not in have and keep(f)]
         base.facts = facts
-        base.intents = list(dict.fromkeys(llm_ex.intents + [i for i in base.intents if i in RULE_INTENTS]))
+        llm_intents = [i for i in llm_ex.intents if not (offer_dropped and i == Intent.OFFER_PRICE)]
+        base.intents = list(dict.fromkeys(llm_intents + [i for i in base.intents if i in RULE_INTENTS]))
         known = {r.type for r in base.risks}
         base.risks += [r for r in llm_ex.risks if r.type not in known]
         base.extractor = self.name

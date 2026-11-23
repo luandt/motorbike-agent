@@ -88,6 +88,8 @@ def askable(state: State, field: str) -> bool:
     if state.asked_counts.get(field, 0) >= MAX_REPEATS:
         return False
     last = state.asked_fields.get(field)
+    if field == "relay_question":
+        return True       # open only while this question has not gone out; a new question resets the count
     return q.priority == 0 or last is None or state.msg_count - last > RECENTLY_ASKED
 
 

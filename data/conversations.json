@@ -63,5 +63,9 @@
   "w5": {
     "buyer_id": "b_w5",
     "seller_id": "s_008"
+  },
+  "w6": {
+    "buyer_id": "b_w6",
+    "seller_id": "s_002"
   }
 }

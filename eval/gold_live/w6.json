@@ -1,0 +1,337 @@
+{
+  "case_id": "w6",
+  "conversation_id": "w6",
+  "sources": [
+    "data/livechats.jsonl"
+  ],
+  "objection": "a chat opened from the Vision 2020 listing: paperwork questions go to the seller, the seller's answers reach the buyer, the budget the buyer gave stays, the bike is restated only when it changes",
+  "expected_final_state": {
+    "constraints.budget_max": 20000000,
+    "constraints.location": "HCM",
+    "constraints.year_min": 2021,
+    "constraints.urgency": "can_wait",
+    "listing.listing_id": "L002",
+    "listing.model": "Vision",
+    "listing.brand": "Honda",
+    "listing.year": 2020,
+    "listing.odo_km": 24000,
+    "listing.ask_price": 21000000,
+    "listing.paperwork_status": "pending_original_docs",
+    "consent.buyer_bridge": true
+  },
+  "expected_final_stage": "NEGOTIATION",
+  "expected_open_risks": [
+    "PAPERWORK_PENDING",
+    "PRICE_GAP"
+  ],
+  "turns": [
+    {
+      "after_msg": "w6#1",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": true,
+      "expected_listing": "L002",
+      "reply_must_include": [
+        [
+          "hồ sơ gốc"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w6#2",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w6#3",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w6#4",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false
+    },
+    {
+      "after_msg": "w6#5",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_not_include": [
+        "khó kịp sang tên"
+      ]
+    },
+    {
+      "after_msg": "w6#6",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_question": "relay_question",
+      "seller_reply_must_include": [
+        [
+          "giấy tờ"
+        ]
+      ],
+      "reply_must_not_include": [
+        "ngân sách khoảng bao nhiêu"
+      ]
+    },
+    {
+      "after_msg": "w6#7",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_not_include": [
+        "ngân sách khoảng bao nhiêu"
+      ]
+    },
+    {
+      "after_msg": "w6#8",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "forbidden_actions": [
+        "seller_floor_price"
+      ],
+      "seller_reply_must_not_include": [
+        "bớt"
+      ],
+      "reply_must_not_include": [
+        "ngân sách khoảng bao nhiêu"
+      ]
+    },
+    {
+      "after_msg": "w6#9",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "seller_reply_must_not_include": [
+        "“đi”"
+      ]
+    },
+    {
+      "after_msg": "w6#10",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_include": [
+        [
+          "2 tuần"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w6#11",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_not_include": [
+        "đang trao đổi về xe",
+        "ngân sách khoảng bao nhiêu"
+      ]
+    },
+    {
+      "after_msg": "w6#12",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_include": [
+        [
+          "2 tuần"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w6#13",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "required_question": "relay_question",
+      "seller_reply_must_include": [
+        [
+          "mai"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w6#14",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_include": [
+        [
+          "người bán trả lời",
+          "người bán đã trả lời",
+          "chủ xe đã trả lời",
+          "người bán nói",
+          "người bán báo",
+          "người bán đồng ý",
+          "người bán xác nhận",
+          "chủ xe trả lời",
+          "chủ xe nói"
+        ]
+      ]
+    },
+    {
+      "after_msg": "w6#15",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_include": [
+        [
+          "người bán trả lời",
+          "người bán đã trả lời",
+          "chủ xe đã trả lời",
+          "người bán nói",
+          "người bán báo",
+          "người bán đồng ý",
+          "người bán xác nhận",
+          "chủ xe trả lời",
+          "chủ xe nói"
+        ]
+      ],
+      "reply_must_not_include": [
+        "chưa có cập nhật",
+        "chưa trả lời"
+      ]
+    },
+    {
+      "after_msg": "w6#16",
+      "acceptable_actions": [
+        "respond_only",
+        "ask_clarification",
+        "search_listings",
+        "get_listing_detail",
+        "create_chat_bridge",
+        "book_appointment",
+        "escalate_to_human"
+      ],
+      "should_escalate": false,
+      "reply_must_include": [
+        [
+          "người bán trả lời",
+          "người bán đã trả lời",
+          "chủ xe đã trả lời",
+          "người bán nói",
+          "người bán báo",
+          "người bán đồng ý",
+          "người bán xác nhận",
+          "chủ xe trả lời",
+          "chủ xe nói"
+        ]
+      ],
+      "reply_must_not_include": [
+        "chưa có cập nhật",
+        "chưa trả lời"
+      ]
+    }
+  ]
+}

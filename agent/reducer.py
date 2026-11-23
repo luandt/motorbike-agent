@@ -28,6 +28,8 @@ PAPERWORK_SPECIFIC = {"pending_original_docs"}
 MAX_GAP_TO_MEET = 0.10        # don't arrange a viewing when the price is >10% apart (policy gates the bridge on it)
 IMPLAUSIBLE_DROP = 0.5          # reject an ask price or buyer offer below 50% of the known ask
 IMPLIED_CONFIDENCE = 0.6        # facts inferred from a listing, not said by anyone
+# seller questions whose answer is passed to the buyer word for word (viewing answers have their own news)
+FORWARD_FIELDS = ("relay_question", "condition_history", "seller_floor_price", "relay_offer")
 BIKE_RISKS = {RiskType.PAPERWORK_PENDING, RiskType.STOLEN_RISK, RiskType.HIGH_ODO}   # about one bike, not the deal
 
 
@@ -51,6 +53,10 @@ def _set_constraint(state: State, name: str, fact: Fact, index: int, diffs: list
     if cur is not None and cur.value == fact.value:
         cur.confidence = max(cur.confidence, fact.confidence)   # re-confirmed
         cur.set_at_index = index
+        if str(cur.source_msg or "").startswith("implied:") and fact.speaker in ("buyer", "seller"):
+            # inferred from the listing, now said by a person: it is theirs ("sg" after the Gò Vấp bike was found)
+            cur.source_msg, cur.speaker = fact.source_msg, fact.speaker
+            diffs.append({"field": f"constraints.{name}", "old": cur.value, "new": cur.value, "source": fact.source_msg})
         return
     history = []
     if cur is not None:
@@ -299,7 +305,23 @@ def apply_extraction(state: State, ex: Extraction, msg: Message) -> tuple[State,
     if mine and any(f.field.startswith("appointment.") for f in ex.facts):
         state.asked_fields.pop(mine, None)
     if msg.sender.value == "buyer" and Intent.ASK_SELLER in ex.intents and not ASKED_YET_RE.search(msg.text):
-        state.relay = {"text": relay_text(redact(msg.text)[0]), "msg": msg.msg_id}
+        # "hỏi chủ xe đi" names no question: it is the buyer's previous message (live chat: "Người mua hỏi: “đi”")
+        q = relay_text(redact(msg.text)[0]) or (state.prev_buyer or {}).get("text")
+        if q:
+            set_relay(state, q, msg.msg_id)
+    side = msg.sender.value
+    if side == "seller":
+        # the seller writing after we sent them a question is their answer; the buyer must hear it (live chat:
+        # "chắc 2 tuần là có", "được" never reached the buyer, who was then told "chưa có cập nhật")
+        pending = [f for f in FORWARD_FIELDS if state.asked_fields.get(f, -1) >= state.last_from.get("seller", -1)
+                   and state.asked_fields.get(f, -1) < state.msg_count]
+        if pending:
+            state.seller_reply = {"text": redact(msg.text)[0], "msg": msg.msg_id, "index": state.msg_count,
+                                  "about": state.relay["text"] if "relay_question" in pending and state.relay else None}
+    if side in ("buyer", "seller"):
+        state.last_from[side] = state.msg_count
+    if side == "buyer":
+        state.prev_buyer = {"text": redact(msg.text)[0], "msg": msg.msg_id}
     sel = state.listing_context.selected
     if msg.sender.value == "buyer" and sel and sel.listing_id and not state.consent.buyer_bridge \
             and {Intent.REQUEST_VIEWING, Intent.SCHEDULE} & set(ex.intents):
@@ -337,6 +359,11 @@ def apply_tool_result(state: State, tool: str, args: dict, result: Any, msg: Mes
     src = f"tool:{tool}"
     lc = state.listing_context
     if tool == "search_listings" and isinstance(result, list):
+        # the buyer saw results for these requirements and went on: they are not guesses to prune any more
+        for name in ("budget_max", "location", "year_min", "brands", "vehicle_type"):
+            t = getattr(state.constraints, name, None)
+            if isinstance(t, Tracked) and t.confidence < PRUNE_CONFIDENCE:
+                t.confidence = PRUNE_CONFIDENCE
         sel_id = lc.selected.listing_id if lc.selected else None
         before = [c.listing_id for c in lc.candidates]
         lc.candidates = [_listing_from_tool(r) for r in result if r["listing_id"] != sel_id]
@@ -469,6 +496,13 @@ def recompute(state: State, msg: Message) -> list[dict]:
     if state.consent.buyer_contact_share is True:
         _resolve(state, RiskType.PII_REQUEST, diffs, "buyer consented")
 
+    # "chiếc vision có thể xong giấy tờ 1-2 tuần ko?": the listing says the papers are pending but not when; only the
+    # seller knows, so the question goes to them (live chat: "chưa có thông tin xác nhận" three times, nothing asked)
+    if msg.sender.value == "buyer" and Intent.ASK_PAPERWORK.value in state.turn_intents and sel and sel.listing_id \
+            and sel.paperwork_status in PAPERWORK_SPECIFIC and in_room(state, sel) and room_seller(state) \
+            and not (state.relay and state.relay["msg"] == msg.msg_id):
+        set_relay(state, relay_text(redact(msg.text)[0]) or redact(msg.text)[0], msg.msg_id)
+
     # stage
     target = _target_stage(state)
     if target != state.lead_stage and _transition_allowed(state.lead_stage, target):
@@ -530,11 +564,25 @@ def _index(msg_id: Optional[str]) -> int:
         return -1
 
 
-def relay_text(text: str) -> str:
-    """"hỏi chủ xe thử địa chỉ nào, đường nào" -> "địa chỉ nào, đường nào"."""
-    t = re.sub(r"(?i)^\s*(bạn\s+|ad\s+|em\s+)?hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?"
-               r"(chủ xe|chủ|người bán|bên bán|anh bán|chị bán)?\s*(thử|giúp|giùm|dùm|xem)?\s*", "", text).strip(" ,.")
-    return t or text
+FILLER = {"đi", "đi ạ", "đi nha", "đi nhé", "đi bạn", "nhé", "nha", "giúp", "giúp mình", "giúp em", "thử", "xem",
+          "thử đi", "giùm", "dùm", "ạ", "với", "giúp với", "thử xem"}
+
+
+def relay_text(text: str) -> Optional[str]:
+    """"hỏi chủ xe thử địa chỉ nào, đường nào" -> "địa chỉ nào, đường nào"; "hỏi chủ xe đi" -> None (no question in it)."""
+    t = re.sub(r"(?i)^\s*(ý\s+(là|mình là)\s+)?(bạn\s+|ad\s+|em\s+)?(đã\s+)?hỏi\s+(thử\s+|giúp\s+|giùm\s+|dùm\s+|lại\s+)?"
+               r"(chủ xe|chủ|người bán|bên bán|anh bán|chị bán)?\s*(thử|giúp|giùm|dùm|xem)?\s*", "", text).strip(" ,.?!")
+    return None if t.lower() in FILLER or len(t) < 3 else t
+
+
+def set_relay(state: State, text: str, msg_id: str) -> None:
+    """A new question for the seller. The same question asked again while unanswered is not sent twice."""
+    cur = state.relay
+    if cur and cur["text"].strip(" ?").lower() == text.strip(" ?").lower() \
+            and not (state.seller_reply and state.seller_reply["index"] > _index(cur["msg"])):
+        return
+    state.relay = {"text": text, "msg": msg_id}
+    state.asked_counts.pop("relay_question", None)          # a new question: the repeat limit starts again
 
 
 def waiting_on(state: State, side: str) -> list[str]:
@@ -578,8 +626,10 @@ def build_open_questions(state: State) -> list[OpenQuestion]:
         qs.append(OpenQuestion(field="other_seller", ask="buyer", priority=0 if asks_discount else 1,
                                reason=f"{sel.listing_id} belongs to {sel.seller_id}, not the seller in this chat"))
     seller_said_no = neg.seller_firm_turns > 0 and "seller_floor_price" in state.asked_fields
+    # over budget: ask the lowest price once; again only when the buyer asks for a discount (live chat: asked again
+    # three messages later as "Người mua hỏi ... bớt thêm", while the buyer was asking about the papers)
     if here and sel and sel.seller_floor is None and not seller_said_no \
-            and ((neg.gap_pct and neg.gap_pct > 0) or asks_discount):
+            and ((neg.gap_pct and neg.gap_pct > 0 and "seller_floor_price" not in state.asked_fields) or asks_discount):
         qs.append(OpenQuestion(field="seller_floor_price", ask="seller", priority=0 if asks_discount else 1,
                                reason="buyer asks for a discount" if asks_discount
                                else "need seller's lowest price to judge the gap"))

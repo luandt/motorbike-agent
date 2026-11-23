@@ -19,9 +19,9 @@ python run.py events --conv c2           # the raw event log (TOOL_CALL, ESCALAT
 python -m eval.run_eval --set dev        # score against hand-labelled gold
 python -m eval.run_eval --set heldout    # paraphrased cases written after the build
 python -m eval.run_eval --set scenarios  # failures found in live chats (wrong bike, other seller)
-python -m eval.run_eval --set live       # the five live web chats (two tabs) where the agent went wrong
+python -m eval.run_eval --set live       # the six live web chats (two tabs) where the agent went wrong
 python -m eval.run_eval --set long       # three 40-message chats: details asked again ~35 messages later
-python -m pytest -q                      # 154 tests
+python -m pytest -q                      # 164 tests
 python run.py replay --conv v1           # a held-out conversation (v1-v3)
 
 python run.py feedback --conv c1 --outcome booked   # feedback loop
@@ -78,7 +78,7 @@ python -m eval.run_eval --set live --llm openai --record runs/rec.json   # paid 
 python -m eval.run_eval --set live --replay runs/rec.json                # the same run again, free and identical
 ```
 
-A replay answers each LLM call from the recording, keyed by the exact prompt. If the code changes what is sent, those calls miss and fall back to the rules, so a replay of old recordings is a free hint, not a measurement. The three final `live` runs are in `eval/recordings/` (`--replay eval/recordings/live_gpt-6-luna_1.json` reproduces run 1 exactly, no key needed).
+A replay answers each LLM call from the recording, keyed by the exact prompt. If the code changes what is sent, those calls miss and fall back to the rules, so a replay of old recordings is a free hint, not a measurement. The recordings are in `eval/recordings/`: the three LLM-first runs on five chats (`live_gpt-6-luna_*.json`) and the run on all six (`live6_gpt-6-luna_1.json`). The w6 fixes changed what is sent, so none of them reproduces exactly any more. A replay still runs free, with no key, as a hint.
 
 ---
 
@@ -270,10 +270,10 @@ The agent never calls tools on a fixed schedule. The planner picks from what `po
 - The dev gold was written alongside the agent, so 100% there means "the agent does what the design intends", not "it generalizes".
 - The held-out set (`data/heldout.jsonl`) was written *after* the build and found 7 real failures. I then fixed them, test-first, which means **v1–v3 are no longer held-out**: their 100% shows the fixes work, not that new conversations will score this well. The next iteration needs a fresh, unseen set, ideally sampled from real logs.
 - Two gold labels changed after review, and both changes are recorded in the label's `note`. v1#3 was tightened (it now requires `get_listing_detail`). c2#3 was widened: answering the buyer's "có rủi ro gì không?" directly (`respond_only`) is a correct move, and the original label wrongly required a tool call or a question.
-- The sample is tiny (27 labelled turns in dev + v1–v3, plus 14 in the live-chat scenarios, plus 11 in three 40-message long chats, `--set long`, which test what the agent remembers from early in a chat, plus 43 messages in the five live web chats, `--set live`; results in SUBMISSION.md §6.5).
+- The sample is tiny (27 labelled turns in dev + v1–v3, plus 14 in the live-chat scenarios, plus 11 in three 40-message long chats, `--set long`, which test what the agent remembers from early in a chat, plus 59 messages in the six live web chats, `--set live`; results in SUBMISSION.md §6.5).
 
 ### Results (LLM mode, the live web chats)
-`--set live` replays the five browser chats (buyer and seller in two tabs) where the agent went wrong: a seller never asked although the buyer was told "đã hỏi", a viewing booked without both sides agreeing or with only "Q1" as the place, "oki" read as a different bike. Their gold labels check the outcome and what each side is told (`reply_must_include`, `seller_reply_must_include`). Three paid runs per version, OpenAI gpt-6-luna, before = commit `3ac1092` with the same eval code:
+`--set live` replays six browser chats (buyer and seller in two tabs) where the agent went wrong: a seller never asked although the buyer was told "đã hỏi", a viewing booked without both sides agreeing or with only "Q1" as the place, "oki" read as a different bike. Their gold labels check the outcome and what each side is told (`reply_must_include`, `seller_reply_must_include`). The table covers the first five (w1–w5). Three paid runs per version, OpenAI gpt-6-luna, before = commit `3ac1092` with the same eval code:
 
 | `live`, mean of 3 runs | before (rules win) | LLM-first v1 | + bike-pick fix | **+ repeat fix (now)** |
 |---|---|---|---|---|
@@ -286,6 +286,8 @@ The agent never calls tools on a fixed schedule. The planner picks from what `po
 | prompt size per run | 0.63M chars | 0.69M | 0.72M | 0.71M (+13%) |
 
 The first LLM-first version was worse, and the table shows why it needed measuring: dropping every rule reading of meaning also dropped the rules' correct bike pick when the LLM said nothing, and the planner's "required" questions were re-sent every turn. Both are fixed and in the last column. Not yet measured: the final code on `all` with a paid run (a free replay of the v1 recordings gave 99% next-action) and on `long`. Details in SUBMISSION.md §6.5.
+
+**A sixth chat, w6.** A buyer opened the chat from the Vision 2020 listing (papers pending) and the agent, in LLM mode in the browser, failed in new ways: no seller answer reached the buyer, the budget was asked for twice, and the bike line came back on every message (rows 24–25 below). One paid run of the fixed code on all six chats: w1–w5 39/39 next-action, 4/4 escalation, 15/16 reply checks, 0 quality flags, 0.69M prompt chars, in line with the last column; w6 16/16 next-action, 1/1 escalation, 0 flags, no unbacked promises. Its two w6 reply-check misses were a bug and a label that was too strict. The run also found the "20t"-as-offer bug (row 26). Both bugs are fixed and checked by replaying that run's recording for free (`eval/recordings/live6_gpt-6-luna_1.json`): 100% next-action, 28/29 reply checks, the miss being the old w3#12. They have not been re-run paid.
 
 ### Error analysis (from actual runs)
 Each row became a failing test in `tests/test_heldout_fixes.py` first and was then fixed.
@@ -315,8 +317,11 @@ Each row became a failing test in `tests/test_heldout_fixes.py` first and was th
 | 21 | live web chats w2–w4 | Wrong state transition | Viewing never arranged ("chiều mai 4h" asked no one); booked "ở quận 1" with no hour and without the buyer; "3h" confirmed without the seller | No agreement model | Time and place are each proposed by one side and agreed by the other; an area is not a bookable place; code adds the agreement question when the LLM planner leaves it out | ✅ fixed |
 | 22 | paid eval, LLM-first v1 | Lost reading | "chiếc 2022 thì có giảm thêm ko" and "oki" to the offered bike: the LLM named no bike, so the rules' correct pick was dropped | LLM silence treated as "no" | The rules' bike pick is used when the LLM names none; when both read a field, the rules' format wins | ✅ fixed |
 | 23 | paid eval, LLM-first v1 | Repeats | 16 repeated messages in 3 runs: the LLM planner re-asked unanswered questions, and one side's "ok" re-opened the other side's question | Cooldown not applied to the LLM planner | LLM questions obey the cooldown; a viewing question waits until that person answers; the reply check sends back a repeat (word-pair overlap ≥85%) | ✅ fixed |
+| 24 | live web chat w6 | Missing memory / silence | The seller's answers ("chắc 2 tuần là có", "được") never reached the buyer, who was told "chưa có cập nhật"; the paperwork question never went to the seller; "hỏi chủ xe đi" went out as "Người mua hỏi: “đi”" | The LLM responder built MUST_SAY without the incoming message, so no line that depends on who wrote reached the LLM; nothing linked a seller message to the question it answers | MUST_SAY gets the message; a seller message after a pending question is kept as `seller_reply` and passed to the buyer in the seller's words; "hỏi chủ xe đi" relays the buyer's previous question; "đã hỏi chưa? / kết quả sao" gets the answer or "chưa trả lời" | ✅ fixed |
+| 25 | live web chat w6 | Repetition | The budget "20t" was dropped and asked again ("đã nói ở trên rồi, 20t"); every reply restated "Mình đang trao đổi về xe Vision 2020…"; "mai coi xe được ko" got "ghi nhận" | A bare amount answering the budget question had low confidence; the bike line never checked whether anything changed; a held viewing was not explained | A bare amount right after the budget question, or with "đã nói / như trên", is a budget and is acknowledged; the bike is restated only when it changes or the reference is unclear; the buyer is told the viewing waits for the papers | ✅ fixed |
+| 26 | paid eval, w6 | Wrong intent / vague reply | The LLM read "20t" (the answer to "ngân sách bao nhiêu?") as an offer, so the seller got "Người mua trả 20tr…"; "đã hỏi chủ xe chưa?" got "vẫn là thông tin mình đã báo ở trên" without "2 tuần" | One amount kept in two fields (budget from the rules, offer from the LLM); the reply check didn't look for the seller's words | The LLM's offer is dropped when the rules read the same amount as the budget (counted as an override); the reply check requires the seller's quoted words in the buyer's reply | ✅ fixed (free replay, not re-run paid) |
 
-**Known limits after the fixes:** the bare-number rule reads only 10–200 (so "250" for an SH would be missed), the alias table is hand-written, and the 50% rule would reject a genuine huge price cut (it's logged, so a human can see it). These are the kind of gaps the LLM extractor and a larger real-log eval set should close.
+**Known limits after the fixes:** the bare-number rule reads only 10–200 (so "250" for an SH would be missed), the alias table is hand-written, and the 50% rule would reject a genuine huge price cut (it's logged, so a human can see it). These are the kind of gaps the LLM extractor and a larger real-log eval set should close. One product decision is open: while papers are pending, the agent holds the viewing as well as any deposit. Allowing the viewing and blocking only the deposit may suit buyers who can wait (w6).
 
 ### Feedback loop (implemented, minimal)
 1. **Collect outcomes:** `run.py feedback --conv c1 --outcome booked|showed_up|closed|dropped|bad_reply` (a FEEDBACK event plus the `outcomes` table).
@@ -362,7 +367,7 @@ Each row became a failing test in `tests/test_heldout_fixes.py` first and was th
 
 ## 13. What I'd do next
 1. Build a fresh unseen eval set (at least 100 labelled conversations sampled from real logs); v1–v3 were used for fixing and no longer count as held-out.
-2. Run `--mode llm` per provider and compare against rules. So far OpenAI gpt-6-luna only: four runs on all 9 cases (next-action 83% → 100% after the fixes each run prompted), then three paid rounds of the LLM-first design on the live web chats (§9). Still to do: a paid run of the final code on `all` and `long`; tell the LLM planner which questions are waiting for an answer (in 19 of 43 live turns code had to replace its plan); the "rồi sao" / "mấy h?" questions in rules mode, which still get "đã ghi nhận" in `long`. Details in SUBMISSION.md §6.5.
+2. Run `--mode llm` per provider and compare against rules. So far OpenAI gpt-6-luna only: four runs on all 9 cases (next-action 83% → 100% after the fixes each run prompted), then three paid rounds of the LLM-first design on the live web chats (§9). Still to do: a paid run of the final code on `all` and `long`, and on `live` after the last two w6 fixes; tell the LLM planner which questions are waiting for an answer (in 19 of 43 live turns code had to replace its plan); the "rồi sao" / "mấy h?" questions in rules mode, which still get "đã ghi nhận" in `long`. Details in SUBMISSION.md §6.5.
 3. Add a circuit breaker in `StructuredLLM` (stop calling after N consecutive failures).
 4. Add a market-price estimator tool ("AB 2021 thường 28–30tr"), a strong lever in price negotiation.
 5. Detect seller credibility signals (prices far below market, repeated listings) and handle several buyers on one listing.

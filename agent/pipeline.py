@@ -91,6 +91,7 @@ class Agent:
         context["agent_last_to_sender"] = to_sender[-1]["text"] if to_sender else None
         ex = self.extractor.extract(msg, state, context)
         old_stage = state.lead_stage
+        old_bike = state.listing_context.selected.listing_id if state.listing_context.selected else None
         risks_before = {r.type.value: list(r.evidence) for r in state.risks}
         state, diffs = apply_extraction(state, ex, msg)
         diffs += self._resolve_listing(state, ex, msg)
@@ -126,7 +127,9 @@ class Agent:
             if h.get("from") == "agent" and h.get("to") in ("buyer", "seller"):
                 sent.setdefault(h["to"], []).append(h["text"])
         replies = self.responder.write(state, executed, new_risks, [i.value for i in ex.intents], news, sent, pinned,
-                                       {"from": msg.sender.value, "id": msg.msg_id, "text": redacted})
+                                       {"from": msg.sender.value, "id": msg.msg_id, "text": redacted,
+                                        "bike_changed": bool(old_bike) and old_bike != (
+                                            state.listing_context.selected.listing_id if state.listing_context.selected else None)})
         flags = self._signals(state, msg, ex, replies, executed, news)
         material = state.lead_stage != old_stage or any(
             d["field"].split(".")[0] in MATERIAL for d in diffs)
@@ -191,8 +194,11 @@ class Agent:
         seller = state.participants.get("seller_id")
         model = (sel.model if sel else None) or lc.mentioned_model
         seller_describes = msg.sender == Sender.SELLER and any(f.field.startswith("listing.") for f in ex.facts)
-        talks_about_bike = model or seller_describes or any(
-            i.value in ("REQUEST_VIEWING", "REQUEST_CONNECT") for i in ex.intents)
+        # "xe này bao lâu có giấy tờ" in a chat opened from the seller's bike is about that bike (live chat:
+        # "mình chưa có thông tin" and a budget question, while the listing says the papers are pending)
+        talks_about_bike = model or seller_describes or N.THIS_BIKE_RE.search(msg.text) or any(
+            i.value in ("REQUEST_VIEWING", "REQUEST_CONNECT", "ASK_PAPERWORK", "ASK_DISCOUNT", "ASK_CONDITION",
+                        "REFERENCE_LISTING") for i in ex.intents)
         if not seller or not talks_about_bike:
             return []
         a = Action(name="find_seller_listings", args={"seller_id": seller}, reason="resolve which bike this chat is about")

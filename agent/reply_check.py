@@ -2,7 +2,8 @@
 
 The LLM writes freely from a MUST_SAY list (the template sentences, each tagged with who it is for). Code then checks:
   1. everyone with a MUST_SAY item gets a reply           (live chat: the planned seller follow-up was dropped)
-  2. each item's numbers, times, bikes and addresses appear in the reply to that person
+  2. each item's numbers, times, bikes and addresses appear in the reply to that person, and the seller's own
+     words when a buyer item passes on the seller's answer      (paid run w6#12: "vẫn là thông tin đã báo ở trên")
   3. no amount in a reply that state, tool results, the message or MUST_SAY don't contain (invented numbers)
   4. "đã hỏi người bán" only when a question really went to the seller   (live chat: "đã hỏi chủ xe rồi")
   5. no internal words ("kênh chat" when the seller is in the chat, "tool")
@@ -23,6 +24,7 @@ SELLER_FIELDS = {"seller_floor_price", "relay_offer", "condition_history", "appo
 ASKED_SELLER_RE = re.compile(r"(?i)(đã|vừa|mới)\s+(hỏi|nhắn|báo)\s+(lại\s+|thêm\s+)?(người bán|chủ xe|bên bán|chủ|anh bán|chị bán)")
 INTERNAL = ["tool", "công cụ", "policy", "hệ thống chưa cho phép"]
 _DOT_MONEY = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{3}){2,})\s*(?:đ|đồng|vnd|vnđ)?(?!\d)", re.I)
+SELLER_WORDS_RE = re.compile(r"trả lời(?: về \u201c[^\u201d]*\u201d)?:?\s*\u201c([^\u201d]+)\u201d")
 _THOUSAND = re.compile(r"(?i)(?<![\d.,])(\d{2,3})\s*(?:k|nghìn|ngàn)(?!\w)")
 
 
@@ -79,7 +81,12 @@ def allowed_money(state: State, items: list[dict], tool_results: list, message: 
 
 def anchors(text: str) -> dict:
     return {"money": money(text), "hours": {int(m.group(1)) for m in N.TIME_RE.finditer(text)},
-            "address": N.find_address(text), "models": {m[1] for m in N.find_models(text)}}
+            "address": N.find_address(text), "models": {m[1] for m in N.find_models(text)},
+            "words": [m.group(1) for m in SELLER_WORDS_RE.finditer(text)]}
+
+
+def _bare(text: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", N.fold(text)).split())
 
 
 def check(replies: list, items: list[dict], state: State, executed: list, tool_results: list,
@@ -102,6 +109,8 @@ def check(replies: list, items: list[dict], state: State, executed: list, tool_r
         if a["address"] and N.fold(a["address"]) not in folded:
             miss.append(a["address"])
         miss += [m for m in a["models"] if N.fold(m) not in folded]
+        if it["to"] == "buyer":                     # the seller's answer is passed on in their words, not "như trên"
+            miss += [f"\u201c{w}\u201d" for w in a["words"] if _bare(w) not in _bare(text)]
         if miss:
             problems.append(f"to the {it['to']}: leaves out {', '.join(miss)} from {it['text']!r}")
     ok_money = allowed_money(state, items, tool_results, message)

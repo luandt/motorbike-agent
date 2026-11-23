@@ -241,6 +241,9 @@ class State(BaseModel):
     seen_intents: list[str] = Field(default_factory=list)
     turn_intents: list[str] = Field(default_factory=list)      # intents of the latest message only
     relay: Optional[dict] = None      # {"text", "msg"}: the buyer's latest question for the seller (redacted)
+    prev_buyer: Optional[dict] = None     # {"text", "msg"}: the buyer's previous message ("hỏi chủ xe đi" points at it)
+    seller_reply: Optional[dict] = None   # {"text", "msg", "index", "about"}: the seller's answer to a question we sent
+    last_from: dict[str, int] = Field(default_factory=dict)    # side -> msg_count of their latest message
     # "field" or "field@listing_id" -> id of the message that set a live price / consent / paperwork fact,
     # plus "candidates_shown" -> the turn whose agent reply listed the current candidates (see memory.pinned_refs)
     anchors: dict[str, str] = Field(default_factory=dict)

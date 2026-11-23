@@ -9,6 +9,9 @@ w3  seller s_009  the seller's "hẹn khách ở quận 1 được ko" was booke
 w4  seller s_009  "có xe nào giới thiệu" got the brand question again; a viewing was booked "ở Q1" while the buyer
     asked for the exact address; "hỏi chủ xe thử địa chỉ nào" sent nothing and the agent said "đã hỏi rồi"
 w5  seller s_008  "oki" to the Gò Vấp bike showed the seller's own Vision 2022 instead; "rồi sao" got nothing
+w6  seller s_002  opened from the Vision 2020 listing: "xe này bao lâu có giấy tờ" got "chưa có thông tin"; the budget
+                "20t" was dropped twice; paperwork questions were never passed on; "hỏi chủ xe đi" went out as "đi"; the
+                seller's answers ("chắc 2 tuần là có", "được") never reached the buyer, who heard "chưa có cập nhật"
 
 Run: python data/make_livechats.py
 """
@@ -69,6 +72,24 @@ CHATS = {
         ("buyer", "oki"),
         ("buyer", "đang hỏi xe ở gò vấp 21 triệu, sao lại đưa xe kia"),
         ("buyer", "rồi sao"),
+    ]),
+    "w6": ("s_002", [
+        ("buyer", "xe này bao lâu có thể có giấy tờ đầy đủ"),
+        ("buyer", "20t"),
+        ("buyer", "sg"),
+        ("buyer", "vision, đời 2021 trở lên"),
+        ("buyer", "ko cần ngay, có thể đợi 1-2 tuần"),
+        ("buyer", "chiếc vision có thể xong giấy tờ 1-2 tuần ko?"),
+        ("buyer", "đã nói ở trên rồi, 20t"),
+        ("buyer", "chiếc vision có thể xong giấy tờ 1-2 tuần ko?"),
+        ("buyer", "hỏi chủ xe đi"),
+        ("seller", "chắc 2 tuần là có"),
+        ("buyer", "vậy mai coi xe được ko"),
+        ("buyer", "đã hỏi chủ xe chưa?"),
+        ("buyer", "ý là đã hỏi mai coi xe trước được ko?"),
+        ("seller", "được"),
+        ("buyer", "hỏi chưa?"),
+        ("buyer", "kết quả sao"),
     ]),
 }
 START = datetime(2026, 11, 22, 2, 0, tzinfo=timezone.utc)      # 09:00 in Vietnam, so "chiều mai" is 23/11

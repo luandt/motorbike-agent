@@ -279,7 +279,12 @@ TIME_RE = re.compile(r"(\d{1,2})\s*(?:h|giờ|gio)\s*(\d{2})?", re.I)
 PLACE_RE = re.compile(r"(?<!\w)(?:ở|tại|tai)\s+((?:quận|quan|q\.?)\s*\d+|[\wÀ-ỹ]+(?:\s+[\wÀ-ỹ]+){0,2})", re.I)
 
 
-ASKED_YET_RE = re.compile(r"(?i)(đã|có)\s+hỏi\b.*\bchưa\b")    # "đã hỏi thử chủ xe đó chưa?": a progress question
+# "đã hỏi thử chủ xe đó chưa?", "hỏi chưa?": a progress question, not a question to pass on
+ASKED_YET_RE = re.compile(r"(?i)(đã|có)\s+hỏi\b.*\bchưa\b|^\s*hỏi\s+(người bán\s+|chủ xe\s+)?chưa\b")
+# "xe này", "chiếc đó": a bike the buyer points at without naming it
+THIS_BIKE_RE = re.compile(r"(?i)\b(xe|chiếc|con)\s+(này|đó|kia|ấy)\b")
+# "kết quả sao", "sao rồi": asking what the seller answered
+RESULT_RE = re.compile(r"(?i)\bkết quả\b|\bsao rồi\b|\brồi sao\b|thế nào rồi|\bntn rồi\b|trả lời chưa|trả lời sao|nói sao")
 ADDRESS_RE = re.compile(r"(?<![\w/])(\d{1,4}[A-Za-z]?(?:/\d+[A-Za-z]?)*)\s+((?:đường\s+)?\w+(?:\s+\w+){0,3})")
 
 

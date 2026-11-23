@@ -130,6 +130,10 @@ class TemplateResponder:
                         line = line[:-3] + ", anh/chị gửi giúp mình địa chỉ cụ thể (số nhà, tên đường) để chốt lịch nhé."
                 (buyer if n["by"] == "seller" else seller).append(line)
         for n in news or []:
+            if n["type"] == "urgency" and sel and sel.listing_id and n["value"] == "can_wait" \
+                    and sel.paperwork_status in ("pending_original_docs",):
+                buyer.append(f"Dạ, mình ghi nhận bạn chờ được để người bán hoàn tất hồ sơ xe {_bike(sel)} ạ.")
+        for n in news or []:
             # answer "cần trong tuần này" about the bike being discussed, not with the next question on the list
             if n["type"] == "urgency" and sel and sel.listing_id and n["value"] == "transfer_now":
                 if sel.paperwork_status == "clean":
@@ -140,6 +144,16 @@ class TemplateResponder:
                 if any(q.field == "accept_floor" for q in state.open_questions) and "accept_floor" not in fields:
                     line += f" Người bán để thấp nhất {vnd(sel.seller_floor)}, bạn có muốn hẹn xem xe trong tuần này không ạ?"
                 buyer.append(line)
+        msg_id, frm = (message or {}).get("id"), (message or {}).get("from")
+        text_in = (message or {}).get("text") or ""
+        rep = state.seller_reply
+        if frm == "seller" and rep and rep["msg"] == msg_id \
+                and not any(n["type"] in ("seller_floor", "appointment_agreed") for n in news or []):
+            # the seller answered a question we sent: the buyer hears it now, word for word (live chat: never sent)
+            buyer.append(_seller_said(rep))
+            ack = "Dạ, mình đã chuyển lời cho người mua ạ."
+            if not any(S.repeats(ack, t) for t in sent.get("seller", [])[-S.WINDOW:]):
+                seller.append(ack)
         if "ASK_DISCOUNT" in intents and sel and state.negotiation.seller_stance == "firm" \
                 and sel.seller_floor is None and "seller_floor_price" not in fields and "other_seller" not in fields:
             buyer.append(f"Người bán xe {_bike(sel)} đã báo giá {vnd(sel.ask_price)} là khó giảm thêm.")
@@ -228,7 +242,7 @@ class TemplateResponder:
                 again = state.asked_counts.get(field, 0) > 1      # counted before this reply is written
                 if field == "seller_floor_price" and again:
                     text = "Người mua hỏi thêm: anh/chị có bớt được nữa không, mức thấp nhất là bao nhiêu ạ?"
-                if field not in ("seller_floor_price", "other_seller", "appointment_confirm", "appointment_ok") and again:
+                if to == "buyer" and field not in ("other_seller", "appointment_ok") and again:
                     text = "Mình hỏi lại một chút để tìm đúng xe cho bạn: " + text[0].lower() + text[1:]
                 if field == "other_seller" and sel and again:
                     text = (f"Như mình nói ở trên, xe {_bike(sel)} là của người bán khác nên chưa hỏi giá trong cuộc trò chuyện này được. "
@@ -256,9 +270,17 @@ class TemplateResponder:
             # no other bike named here: the WRONG_BIKE check stays strict
             buyer.append("Giá xe này chỉ người bán của nó trả lời được. Bạn có thể nhắn \"kết nối\" để mình mở kênh chat "
                          "với họ, hoặc tiếp tục trao đổi xe của người bán ở đây ạ.")
-        if sel and sel.listing_id and {"REFERENCE_LISTING", "SELECT_LISTING"} & set(intents) \
-                and "get_listing_detail" not in names:
-            # say which bike we are on, so a mix-up shows at once instead of three messages later
+        lc = state.listing_context
+        others = {x.listing_id for x in [*lc.candidates, *lc.previous] if x and x.listing_id} - {sel.listing_id if sel else None}
+        # "xe này" with more than one bike in play, or the buyer naming the bike ("đang nói vision 2020 ở gò vấp"
+        # corrects a mix-up): say which bike. Not "vậy mai coi xe được ko" on the only bike there is.
+        unclear = (bool(N.THIS_BIKE_RE.search(text_in)) and bool(others or len(lc.seller_listing_options) > 1)) \
+            or bool(sel and sel.model and sel.year and any(m[1] == sel.model for m in N.find_models(text_in))
+                    and sel.year in N.parse_years(text_in))
+        if sel and sel.listing_id and "get_listing_detail" not in names \
+                and ((message or {}).get("bike_changed") or (unclear and {"REFERENCE_LISTING", "SELECT_LISTING"} & set(intents))):
+            # say which bike we are on when the buyer switched bikes or "xe này" could be more than one; not on every
+            # mention of a bike (live chat: the same summary after "vậy mai coi xe được ko")
             line = (f"Dạ, mình đang trao đổi về xe {_bike(sel)}, giá {vnd(sel.ask_price)}"
                     + (f", giấy tờ {PAPER_TEXT.get(sel.paperwork_status, sel.paperwork_status)}" if sel.paperwork_status else "")
                     + ".")
@@ -266,17 +288,38 @@ class TemplateResponder:
                 buyer.insert(0, line)
             elif not buyer:
                 buyer.append(f"Dạ đúng rồi, vẫn là xe {_bike(sel)} ạ.")
-        # someone wrote while the viewing waits on the other side, and nothing else is due to them: say what we wait for
-        # (instead of asking the other side the same question again, which the cooldown now stops)
-        frm = (message or {}).get("from")
-        if frm == "buyer" and not buyer and N.ASKED_YET_RE.search((message or {}).get("text") or ""):
+        held = [r for r in state.active_risks() if r.severity == "high" and r.status != "resolved" and state.applies(r)]
+        if frm == "buyer" and "REQUEST_VIEWING" in intents and held and not state.channel_id \
+                and not {"create_chat_bridge", "book_appointment"} & names and "ASK_SELLER" not in intents:
+            # the viewing is held by an open check: say so instead of "ghi nhận" (live chat: "vậy mai coi xe được ko")
+            buyer.append("Dạ, xe này đang được bộ phận hỗ trợ kiểm tra giấy tờ nên mình chưa đặt lịch xem xe được. "
+                         "Khi có kết quả mình báo bạn ngay; trong lúc chờ bạn chưa nên đặt cọc nhé.")
+        # "hỏi chưa?", "kết quả sao", "hỏi chủ xe đi" with nothing new to send: say what the seller answered, or that
+        # they have not answered yet (live chat: "chưa có cập nhật" after the seller had said "được")
+        from .reducer import relay_text
+        same_q = bool(state.relay and state.relay["msg"] != msg_id
+                      and N.fold(relay_text(text_in) or text_in).strip(" ?") == N.fold(state.relay["text"]).strip(" ?"))
+        if frm == "buyer" and not buyer and (N.ASKED_YET_RE.search(text_in) or N.RESULT_RE.search(text_in) or same_q
+                                             or ("ASK_SELLER" in intents and "relay_question" not in fields)):
             from .reply_check import SELLER_FIELDS
             last = max((state.asked_fields[f] for f in SELLER_FIELDS if f in state.asked_fields), default=None)
-            if last is not None and state.msg_count - last <= 6:
-                buyer.append("Dạ, người bán chưa trả lời ạ. Mình đã hỏi lúc nãy, có tin là mình báo bạn ngay.")
+            q = f" \u201c{state.relay['text']}\u201d" if state.relay else ""
+            if rep and last is not None and rep["index"] > last:
+                said = _seller_said(rep)
+                buyer.append(_fresh(sent, [
+                    "Dạ, " + said[0].lower() + said[1:],
+                    f"Dạ, như mình báo ở trên, người bán đã trả lời: \u201c{rep['text']}\u201d. Bạn cần mình hỏi người bán thêm gì không ạ?",
+                    f"Người bán đã trả lời \u201c{rep['text']}\u201d rồi ạ. Bạn còn câu nào cần hỏi người bán, cứ nhắn để mình chuyển lời nhé."]))
+            elif last is not None and state.msg_count - last <= 6:
+                buyer.append(_fresh(sent, [
+                    "Dạ, người bán chưa trả lời ạ. Mình đã hỏi lúc nãy, có tin là mình báo bạn ngay.",
+                    f"Dạ, mình vẫn đang chờ người bán trả lời câu hỏi{q} ạ.",
+                    "Người bán vẫn chưa nhắn lại ạ; có trả lời là mình chuyển cho bạn ngay."]))
         if frm == "buyer" and not buyer and state.appointment.proposed_time is None and state.consent.buyer_bridge \
                 and re.search(r"(?i)mấy\s*(h|giờ)\b|giờ nào", (message or {}).get("text") or ""):
             buyer.append("Dạ giờ xem xe chưa có ạ. Bạn muốn xem lúc mấy giờ để mình hỏi người bán?")    # "mấy h?"
+        if frm == "buyer" and not buyer and budget and budget in {m.high for m in N.parse_money(text_in)}:
+            buyer.append(f"Dạ, mình ghi nhận ngân sách {vnd(budget)} của bạn ạ.")      # "20t", "đã nói ở trên rồi, 20t"
         if frm in ("buyer", "seller") and not (buyer if frm == "buyer" else seller):
             line = _waiting_line(state, "seller" if frm == "buyer" else "buyer")
             if line:
@@ -291,6 +334,17 @@ class TemplateResponder:
         if seller:
             out.append(Reply(to="seller", text=" ".join(seller)))
         return out
+
+
+def _fresh(sent: dict, options: list[str]) -> str:
+    """The first wording that does not repeat a recent message to the buyer (the buyer asks "hỏi chưa?" again)."""
+    recent = (sent or {}).get("buyer", [])[-S.WINDOW:]
+    return next((o for o in options if not any(S.repeats(o, t) for t in recent)), options[-1])
+
+
+def _seller_said(rep: dict) -> str:
+    about = f" về \u201c{rep['about']}\u201d" if rep.get("about") else ""
+    return f"Người bán trả lời{about}: \u201c{rep['text']}\u201d."
 
 
 def _empty_search_text(state: State, args: dict) -> str:
@@ -426,7 +480,7 @@ class LLMResponder:
               sent: Optional[dict] = None, pinned: Optional[list[dict]] = None,
               message: Optional[dict] = None) -> list[Reply]:
         from . import reply_check as RC
-        draft = self.templates.write(state, executed, new_risks, intents, news, sent)
+        draft = self.templates.write(state, executed, new_risks, intents, news, sent, pinned, message)
         items = self.templates.last_items
         names = {a.name for a, _ in executed}
         results = [r for _, r in executed]
